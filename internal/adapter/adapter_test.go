@@ -134,6 +134,29 @@ func TestProbeProtocolViolations(t *testing.T) {
 	}
 }
 
+// TestClosedPipe pins the classification that lets do() survive the race
+// where the adapter exits before the request write lands: a write into a
+// pipe whose read end is gone must be recognized, anything else must not.
+func TestClosedPipe(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatalf("close read end: %v", err)
+	}
+	_, werr := w.Write([]byte("x"))
+	if !closedPipe(werr) {
+		t.Errorf("write into closed pipe returned %v, want a closedPipe match", werr)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close write end: %v", err)
+	}
+	if closedPipe(nil) || closedPipe(errors.New("boom")) {
+		t.Error("closedPipe must not match nil or unrelated errors")
+	}
+}
+
 func TestProbeAdapterSentError(t *testing.T) {
 	script := prelude + `printf '{"protocol":"probavi-adapter/0","request_id":"%s","ok":false,"error":{"code":"unsupported_source","message":"no such kind","retryable":false}}\n' "$RID"`
 	r := fakeRunner(t, script, nil, nil)
@@ -382,20 +405,54 @@ func TestTransportErrorPropagation(t *testing.T) {
 	}
 }
 
-func TestWriteRequestFailure(t *testing.T) {
+func TestWriteRequestClosedPipe(t *testing.T) {
 	// The adapter closes its stdin immediately; the oversized request
 	// cannot fit the pipe buffer, so the core's write deterministically
-	// fails and the early-error cleanup path (finish before wait) runs.
-	script := `exec 0<&-` + "\n" + `sleep 0.3` + "\n" + `exit 0`
-	r := fakeRunner(t, script, nil, nil)
-	req := &ProvisionRequest{
-		Source:  ProvisionSource{Kind: "f", Path: "/b"},
-		Options: map[string]string{"pad": strings.Repeat("x", 256*1024)},
+	// hits a closed pipe. That is not a verdict — the adapter's own
+	// conduct decides: with the small requests of real operations the same
+	// exits race the write (CI flake, 2026-07-31), and both orders must
+	// classify identically.
+	tests := []struct {
+		name       string
+		exit       string
+		wantSubstr string
+	}{
+		{"clean exit without response", "exit 0", "without a final response"},
+		{"crash exit carries status", "exit 3", "exit status 3"},
 	}
-	_, err := r.Provision(context.Background(), req, &fakeVerbs{})
-	aerr := asAdapterError(t, err)
-	if aerr.Code != CodeAdapterCrash || !strings.Contains(aerr.Message, "write request") {
-		t.Errorf("error = %+v, want write-request crash", aerr)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			script := `exec 0<&-` + "\n" + `sleep 0.3` + "\n" + tt.exit
+			r := fakeRunner(t, script, nil, nil)
+			req := &ProvisionRequest{
+				Source:  ProvisionSource{Kind: "f", Path: "/b"},
+				Options: map[string]string{"pad": strings.Repeat("x", 256*1024)},
+			}
+			_, err := r.Provision(context.Background(), req, &fakeVerbs{})
+			aerr := asAdapterError(t, err)
+			if aerr.Code != CodeAdapterCrash || !strings.Contains(aerr.Message, tt.wantSubstr) {
+				t.Errorf("error = %+v, want %s containing %q", aerr, CodeAdapterCrash, tt.wantSubstr)
+			}
+		})
+	}
+}
+
+func TestFinishReapsWithoutWait(t *testing.T) {
+	// finish() is the cleanup of early-error paths that return before the
+	// normal wait; it must kill and reap a lingering adapter promptly, not
+	// sit out its runtime.
+	r := fakeRunner(t, "sleep 5", nil, nil)
+	s, err := r.start(context.Background())
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	start := time.Now()
+	s.finish()
+	if !s.waited {
+		t.Error("finish must reap the process")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("finish took %v, must kill rather than wait out the adapter", elapsed)
 	}
 }
 

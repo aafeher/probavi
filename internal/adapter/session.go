@@ -33,7 +33,7 @@ func (r *Runner) do(ctx context.Context, op string, payload any, verbs SandboxVe
 	}
 	defer s.finish()
 
-	if _, err := s.stdin.Write(append(request, '\n')); err != nil {
+	if _, err := s.stdin.Write(append(request, '\n')); err != nil && !closedPipe(err) {
 		return nil, crashf("%s: write request: %v", op, err)
 	}
 
@@ -63,6 +63,15 @@ func (r *Runner) do(ctx context.Context, op string, payload any, verbs SandboxVe
 		return nil, final.Error
 	}
 	return final.Payload, nil
+}
+
+// closedPipe reports a write failure meaning the adapter closed its end of
+// the pipe — usually because it already exited, racing our request write.
+// That alone is no verdict: the truth (a crash, a clean exit without a
+// response, or a protocol violation) comes from the read loop and the exit
+// status, exactly as when the write lands before the exit.
+func closedPipe(err error) bool {
+	return errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed)
 }
 
 // session is one adapter process with its pipes.
