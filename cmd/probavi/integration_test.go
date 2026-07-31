@@ -87,7 +87,12 @@ func TestFullDrillViaCLI(t *testing.T) {
 	// process is dead. Live-owner containers belong to integration tests
 	// of other packages running in parallel and must be tolerated.
 	for _, id := range strings.Fields(dockerOut(t, ctx, "ps", "-aq", "--filter", "label=com.probavi.sandbox=1")) {
-		pid := dockerOut(t, ctx, "inspect", "-f", `{{ index .Config.Labels "com.probavi.pid" }}`, id)
+		out, err := exec.CommandContext(ctx, "docker", "inspect", "-f",
+			`{{ index .Config.Labels "com.probavi.pid" }}`, id).Output()
+		if err != nil {
+			continue // vanished between ps and inspect — that IS the cleanup working
+		}
+		pid := strings.TrimSpace(string(out))
 		if _, err := os.Stat("/proc/" + pid); err != nil {
 			t.Errorf("orphaned sandbox %s (dead owner pid %s) survived the drill", id, pid)
 		}
@@ -151,7 +156,8 @@ func makeFixture(t *testing.T, ctx context.Context, dest string) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("seed engine never became ready")
+			logs, lerr := exec.CommandContext(ctx, "docker", "logs", "--tail", "30", id).CombinedOutput()
+			t.Fatalf("seed engine never became ready (docker logs err=%v):\n%s", lerr, logs)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -202,9 +208,15 @@ func mustRun(t *testing.T, ctx context.Context, bin string, args ...string) stri
 
 func dockerOut(t *testing.T, ctx context.Context, args ...string) string {
 	t.Helper()
-	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+	// Output, not CombinedOutput: docker streams pull progress to stderr on
+	// a cold image cache, and mixing it in corrupts captured container ids.
+	out, err := exec.CommandContext(ctx, "docker", args...).Output()
 	if err != nil {
-		t.Fatalf("docker %v: %v: %s", args, err, out)
+		var exitErr *exec.ExitError
+		if isExitError(err, &exitErr) {
+			t.Fatalf("docker %v: %v: %s", args, err, exitErr.Stderr)
+		}
+		t.Fatalf("docker %v: %v", args, err)
 	}
 	return strings.TrimSpace(string(out))
 }
