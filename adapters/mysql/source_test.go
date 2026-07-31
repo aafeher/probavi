@@ -31,7 +31,7 @@ func TestResolveSourceFile(t *testing.T) {
 	}{
 		{"missing file", "mysqldump", filepath.Join(dir, "gone.sql"), "source_not_found"},
 		{"directory as file", "mysqldump", dir, "invalid_request"},
-		{"unsupported kind", "xtrabackup", path, "unsupported_source"},
+		{"unsupported kind", "walg", path, "unsupported_source"},
 		{"missing directory", "mysqldump_dir", filepath.Join(dir, "gone"), "source_not_found"},
 	}
 	for _, tt := range tests {

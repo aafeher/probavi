@@ -11,9 +11,7 @@ from the protocol document alone.
 |-----------------|-------------------------------------------------------------|
 | `mysqldump`     | One `mysqldump` SQL file.                                   |
 | `mysqldump_dir` | A directory of dump files; the newest regular file is restored (mtime, ties broken by name). |
-
-Planned: one physical-backup source (Percona XtraBackup) — the second half
-of the ROADMAP Phase 2 adapter item.
+| `xtrabackup`    | A Percona XtraBackup full-backup directory (unprepared, as `xtrabackup --backup` leaves it) — a physical restore. |
 
 ## Sandbox image and authentication
 
@@ -47,6 +45,36 @@ expressible at all. The credential never protects anything reachable.
   input the parser rejects (`ERROR 1064`, `ASCII '\0'`) is classified
   `source_corrupt`.
 
+## The xtrabackup kind (physical restore)
+
+An XtraBackup restore replaces the data directory, so the engine must not
+be running when the drill starts. Requirements:
+
+- **Sandbox image** containing `mysqld`, `xtrabackup`, and `gosu`, with the
+  XtraBackup major version matching the server (e.g. built
+  `FROM mysql:8.0-debian` + `percona-xtrabackup-80` from the Percona apt
+  repository — the integration test builds exactly this).
+- **Idle start**: the sandbox must not boot the engine — with the docker
+  provider set `command: sleep infinity` in `sandbox.params`. The adapter
+  refuses to run against an already-running engine.
+- **Unprepared full backup**: the source directory is what
+  `xtrabackup --backup --target-dir=...` produced; the adapter runs
+  `--prepare` and `--copy-back` itself (both timed as restore work). A
+  directory without `xtrabackup_checkpoints` is refused as
+  `source_corrupt` before any transfer.
+
+The restored grant tables carry **production credentials the drill does
+not have**, so the adapter starts the server with an `--init-file` that
+resets `'root'@'%'` to an empty password with full privileges — the MySQL
+equivalent of the postgres adapter's `pg_hba.conf` trust overwrite. The
+sandbox has no network exposure whatsoever (`--network none`, no published
+ports), so this access never extends beyond the disposable container.
+
+Physical mode ignores `options.user`/`options.database`: the connection is
+always `root` on the `mysql` system schema (the only database guaranteed
+to exist in an arbitrary restored server). Point checks at restored data
+with schema-qualified table names (e.g. `table: shop.orders`).
+
 ## The ANSI_QUOTES bridge
 
 The core validates and quotes check identifiers in SQL-standard form
@@ -60,17 +88,21 @@ exists for (§6.1).
 ## Backup identity
 
 - `checksum`: SHA-256 over the selected artifact's bytes (for
-  `mysqldump_dir`, the chosen file).
-- `created_at`: the artifact's modification time — the closest derivable
-  stand-in for the backup's creation time; treat it accordingly if you
-  copy backup files around without preserving timestamps.
+  `mysqldump_dir`, the chosen file). For `xtrabackup` directories: a
+  canonical tree hash — entries sorted by relative path; each regular file
+  contributes `relpath NUL size NUL content`, each symlink
+  `relpath NUL "L" target NUL`.
+- `created_at`: the artifact's modification time (for backup directories:
+  the newest file's mtime) — the closest derivable stand-in for the
+  backup's creation time; treat it accordingly if you copy backup files
+  around without preserving timestamps.
 
 ## Drill config options
 
 | Option     | Default   | Meaning                               |
 |------------|-----------|---------------------------------------|
-| `user`     | `root`    | Superuser inside the sandbox engine.  |
-| `database` | `probavi` | Database to restore into (letters, digits, underscores only). |
+| `user`     | `root`    | Superuser inside the sandbox engine (logical restores only). |
+| `database` | `probavi` | Database to restore into (letters, digits, underscores only; logical restores only). |
 
 ## Environment
 

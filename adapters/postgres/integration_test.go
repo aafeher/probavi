@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -235,8 +236,11 @@ func buildPgBackRestImage(t *testing.T, ctx context.Context) string {
 // repo to the host.
 func makeBackRestRepo(t *testing.T, ctx context.Context, image, dest string) {
 	t.Helper()
+	// The owner-pid label carries the REAL test process: a concurrent
+	// sweep must spare the live seed; if this process dies, the next
+	// sweep reaps the leftover.
 	out, err := exec.CommandContext(ctx, "docker", "run", "-d",
-		"--label", docker.LabelSandbox+"=1", "--label", "com.probavi.pid=2147483646",
+		"--label", docker.LabelSandbox+"=1", "--label", "com.probavi.pid="+strconv.Itoa(os.Getpid()),
 		"--network", "none", image, "sleep", "infinity").Output()
 	if err != nil {
 		t.Fatalf("start seed container: %v", err)

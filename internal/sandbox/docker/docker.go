@@ -143,6 +143,11 @@ func (p *Provider) isOrphan(ctx context.Context, id string) (bool, error) {
 		return false, fmt.Errorf("inspect %s: %w", id, err)
 	}
 	if exit != 0 {
+		// Vanished between list and inspect: a concurrent drill's teardown
+		// finished first. Gone means nothing left to sweep — not an error.
+		if strings.Contains(string(stderr), "No such object") {
+			return false, nil
+		}
 		return false, fmt.Errorf("inspect %s: docker inspect exited %d: %s", id, exit, firstLine(stderr))
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(stdout)))
