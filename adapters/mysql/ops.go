@@ -12,7 +12,7 @@ import (
 
 const (
 	adapterName    = "mysql"
-	adapterVersion = "0.1.0"
+	adapterVersion = "0.2.0"
 
 	defaultUser     = "root"
 	defaultDatabase = "probavi"
@@ -39,6 +39,7 @@ func probePayload() any {
 		"sources": []map[string]any{
 			{"kind": "mysqldump", "capabilities": map[string]bool{"pitr": false}},
 			{"kind": "mysqldump_dir", "capabilities": map[string]bool{"pitr": false}},
+			{"kind": "xtrabackup", "capabilities": map[string]bool{"pitr": false}},
 		},
 		"sql_runner": map[string]any{
 			// Appending ANSI_QUOTES to the session sql_mode makes the server
@@ -99,6 +100,10 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 		return nil, perr
 	}
 	logger.Info("source resolved", "path", src.path, "size_bytes", src.sizeBytes)
+
+	if req.Source.Kind == "xtrabackup" {
+		return provisionPhysical(ctx, c, req, src, logger)
+	}
 
 	readySeconds, perr := awaitEngine(ctx, c, user)
 	if perr != nil {

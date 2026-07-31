@@ -25,6 +25,7 @@ type resolvedSource struct {
 //
 //	mysqldump      — path is a mysqldump SQL file
 //	mysqldump_dir  — path is a directory; the newest regular file is chosen
+//	xtrabackup     — path is an XtraBackup full-backup directory
 func resolveSource(kind, path string) (*resolvedSource, *protoError) {
 	switch kind {
 	case "mysqldump":
@@ -35,10 +36,103 @@ func resolveSource(kind, path string) (*resolvedSource, *protoError) {
 			return nil, perr
 		}
 		return resolveFile(latest)
+	case "xtrabackup":
+		src, perr := resolveRepo(path)
+		if perr != nil {
+			return nil, perr
+		}
+		// Every xtrabackup backup carries this metadata file; its absence
+		// means the directory is something else — refuse before a single
+		// byte is transferred.
+		if _, err := os.Stat(filepath.Join(path, "xtrabackup_checkpoints")); err != nil {
+			return nil, protoErr("source_corrupt", false,
+				"backup directory %s lacks xtrabackup_checkpoints — not an xtrabackup backup", path)
+		}
+		return src, nil
 	default:
 		return nil, protoErr("unsupported_source", false,
-			"unsupported source kind: %s (supported: mysqldump, mysqldump_dir)", kind)
+			"unsupported source kind: %s (supported: mysqldump, mysqldump_dir, xtrabackup)", kind)
 	}
+}
+
+// resolveRepo resolves a directory source: the checksum is a canonical hash
+// over the whole tree (documented in the adapter README), created_at is the
+// newest file's mtime.
+func resolveRepo(dir string) (*resolvedSource, *protoError) {
+	info, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return nil, protoErr("source_not_found", false, "backup directory does not exist: %s", dir)
+	case err != nil:
+		return nil, protoErr("source_unreadable", false, "stat backup directory: %v", err)
+	case !info.IsDir():
+		return nil, protoErr("invalid_request", false,
+			"source path %s is a file; the xtrabackup kind expects a backup directory", dir)
+	}
+	checksum, size, newest, perr := dirChecksum(dir)
+	if perr != nil {
+		return nil, perr
+	}
+	created := newest.UTC().Format("2006-01-02T15:04:05.000Z")
+	return &resolvedSource{path: dir, checksum: checksum, sizeBytes: size, createdAt: &created}, nil
+}
+
+// dirChecksum hashes a directory tree canonically: entries sorted by
+// relative path; regular files contribute path, size, and content bytes,
+// symlinks contribute path and target. The same tree always hashes the
+// same, any content change changes the hash.
+func dirChecksum(root string) (string, int64, time.Time, *protoError) {
+	h := sha256.New()
+	var total int64
+	var newest time.Time
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		return hashEntry(h, path, rel, d, &total, &newest)
+	})
+	if err != nil {
+		return "", 0, time.Time{}, protoErr("source_unreadable", false, "read backup directory: %v", err)
+	}
+	if newest.IsZero() {
+		return "", 0, time.Time{}, protoErr("source_not_found", false, "backup directory %s contains no files", root)
+	}
+	return fmt.Sprintf("sha256:%s", hex.EncodeToString(h.Sum(nil))), total, newest, nil
+}
+
+func hashEntry(h io.Writer, path, rel string, d os.DirEntry, total *int64, newest *time.Time) error {
+	switch {
+	case d.Type().IsRegular():
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		*total += info.Size()
+		if info.ModTime().After(*newest) {
+			*newest = info.ModTime()
+		}
+		fmt.Fprintf(h, "%s\x00%d\x00", rel, info.Size())
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		_, cerr := io.Copy(h, f)
+		if err := f.Close(); err != nil && cerr == nil {
+			cerr = err
+		}
+		return cerr
+	case d.Type()&os.ModeSymlink != 0:
+		target, err := os.Readlink(path)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "%s\x00L%s\x00", rel, target)
+	}
+	return nil
 }
 
 func resolveFile(path string) (*resolvedSource, *protoError) {

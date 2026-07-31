@@ -36,7 +36,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
 
 **Goal:** demonstrate that both extension axes (engines, sandboxes) work without touching the core.
 
-- [ ] Second adapter: MySQL/MariaDB (`mysqldump` + one physical-backup source). **Test of the protocol: if the core needs changes, fix the protocol now — it is still cheap.** *Logical path complete 2026-07-31 (`adapters/mysql`: `mysqldump` + `mysqldump_dir`) with zero core changes — the dialect difference (MySQL rejects SQL-standard quoted identifiers) is absorbed declaratively by the adapter's `sql_runner` template (`ANSI_QUOTES` via `--init-command`), exactly as the protocol intended. Physical source (XtraBackup) pending.*
+- [x] Second adapter: MySQL/MariaDB (`mysqldump` + one physical-backup source). **Test of the protocol: if the core needs changes, fix the protocol now — it is still cheap.** **Complete 2026-07-31 (`adapters/mysql`: `mysqldump` + `mysqldump_dir` logical, Percona XtraBackup physical) with zero core changes. The protocol passed its test: the dialect difference (MySQL rejects SQL-standard quoted identifiers) is absorbed declaratively by the adapter's `sql_runner` template (`ANSI_QUOTES` via `--init-command`), and the physical flow reuses the idle-sandbox pattern with an `--init-file` auth reset mirroring the postgres adapter's pg_hba trust overwrite. Both paths proven end to end against real Docker.**
 - [ ] Point-in-time recovery drills: "restore to yesterday 14:32" for Postgres (WAL replay via wal-g or pgBackRest).
 - [ ] Second sandbox provider: Kubernetes Job **or** remote host over SSH (pick based on user demand).
 - [ ] Restore-duration trend data surfaced in metrics; alert-friendly derived metrics (e.g. rolling P95 restore time).

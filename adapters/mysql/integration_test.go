@@ -162,6 +162,136 @@ func TestCorruptDumpVerdict(t *testing.T) {
 	}
 }
 
+// TestXtraBackupEndToEnd proves the physical-restore path: a real
+// XtraBackup full backup (taken on a seed server) is restored through the
+// full stack into an idle sandbox, the auth-reset init file opens
+// sandbox-local access, and the data comes back queryable through the
+// sql_runner with a schema-qualified ANSI-quoted identifier.
+func TestXtraBackupEndToEnd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+
+	image := buildXtraBackupImage(t, ctx)
+
+	binDir := t.TempDir()
+	if out, err := exec.CommandContext(ctx, "go", "build", "-o",
+		filepath.Join(binDir, "probavi-adapter-mysql"), ".").CombinedOutput(); err != nil {
+		t.Fatalf("build adapter: %v: %s", err, out)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	hostBackup := filepath.Join(t.TempDir(), "backup")
+	makeXtraBackupFixture(t, ctx, image, hostBackup)
+
+	provider := docker.New(nil)
+	sbx, err := provider.Create(ctx, map[string]string{"image": image, "command": "sleep infinity"})
+	if err != nil {
+		t.Fatalf("create idle sandbox: %v", err)
+	}
+	defer destroy(t, sbx)
+
+	runner, err := adapter.New("mysql", nil, nil)
+	if err != nil {
+		t.Fatalf("resolve adapter: %v", err)
+	}
+	res, err := runner.Provision(ctx, &adapter.ProvisionRequest{
+		Source:  adapter.ProvisionSource{Kind: "xtrabackup", Path: hostBackup},
+		Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
+	}, sbx)
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if res.Timings.RestoreSeconds <= 0 || res.Timings.EngineReadySeconds <= 0 {
+		t.Errorf("timings = %+v, want real measurements", res.Timings)
+	}
+	if res.Connection.Database != "mysql" || res.Connection.User != "root" {
+		t.Errorf("connection = %+v, want root on the system schema", res.Connection)
+	}
+
+	health, err := runner.Healthcheck(ctx, &res.Connection, res.State, sbx)
+	if err != nil || !health.Healthy {
+		t.Fatalf("healthcheck = %+v err=%v", health, err)
+	}
+
+	// Physical drills validate restored data with schema-qualified names;
+	// the double-quoted form pins the ANSI_QUOTES bridge on this path too.
+	probe, err := runner.Probe(ctx)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	argv := make([]string, 0, len(probe.SQLRunner.Argv))
+	for _, a := range probe.SQLRunner.Argv {
+		a = strings.ReplaceAll(a, "{{user}}", res.Connection.User)
+		a = strings.ReplaceAll(a, "{{database}}", res.Connection.Database)
+		a = strings.ReplaceAll(a, "{{sql}}", `SELECT count(*) FROM "shop"."orders"`)
+		argv = append(argv, a)
+	}
+	out, err := sbx.Exec(ctx, sandbox.ExecRequest{Argv: argv})
+	if err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count := strings.TrimSpace(string(out.Stdout)); out.ExitCode != 0 || count != "500" {
+		t.Fatalf("row count = %q (exit %d, stderr %s), want 500", count, out.ExitCode, out.Stderr)
+	}
+	if _, err := runner.Teardown(ctx, res.State, "completed", sbx); err != nil {
+		t.Fatalf("teardown: %v", err)
+	}
+}
+
+// buildXtraBackupImage builds (once, cached afterwards) a mysql image with
+// Percona XtraBackup installed — the documented requirement for the
+// xtrabackup source kind. The Debian variant is used because the Percona
+// apt repository makes the install reproducible.
+func buildXtraBackupImage(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	const tag = "probavi-it-xtrabackup:8.0"
+	dir := t.TempDir()
+	dockerfile := `FROM mysql:8.0-debian
+RUN apt-get update && apt-get install -y --no-install-recommends wget curl gnupg2 lsb-release ca-certificates \
+ && wget -q https://repo.percona.com/apt/percona-release_latest.generic_all.deb \
+ && dpkg -i percona-release_latest.generic_all.deb \
+ && percona-release enable-only pxb-80 release \
+ && apt-get update && apt-get install -y --no-install-recommends percona-xtrabackup-80 \
+ && rm -rf /var/lib/apt/lists/* percona-release_latest.generic_all.deb
+`
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o600); err != nil {
+		t.Fatalf("write dockerfile: %v", err)
+	}
+	if out, err := exec.CommandContext(ctx, "docker", "build", "-q", "-t", tag, dir).CombinedOutput(); err != nil {
+		t.Fatalf("build test image: %v: %s", err, out)
+	}
+	return tag
+}
+
+// makeXtraBackupFixture seeds a real server in an idle container, takes a
+// full XtraBackup backup, and copies it to the host — unprepared, as a
+// production backup job would store it.
+func makeXtraBackupFixture(t *testing.T, ctx context.Context, image, dest string) {
+	t.Helper()
+	out, err := exec.CommandContext(ctx, "docker", "run", "-d",
+		"--label", docker.LabelSandbox+"=1", "--label", "com.probavi.pid=2147483646",
+		"--network", "none", image, "sleep", "infinity").Output()
+	if err != nil {
+		t.Fatalf("start seed container: %v", err)
+	}
+	id := strings.TrimSpace(string(out))
+	defer exec.Command("docker", "rm", "-f", "-v", id).Run() //nolint:errcheck // best-effort cleanup
+
+	seedScript := `set -e
+chown -R mysql:mysql /var/lib/mysql /var/run/mysqld
+gosu mysql mysqld --initialize-insecure --datadir=/var/lib/mysql
+gosu mysql mysqld --daemonize --pid-file=/tmp/seed.pid --log-error=/tmp/seed.err
+mysql --socket=/var/run/mysqld/mysqld.sock -u root -e "CREATE DATABASE shop; CREATE TABLE shop.orders (id BIGINT AUTO_INCREMENT PRIMARY KEY, total DECIMAL(10,2) NOT NULL); INSERT INTO shop.orders (total) WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n < 500) SELECT ROUND(RAND()*100,2) FROM seq;"
+xtrabackup --backup --user=root --socket=/var/run/mysqld/mysqld.sock --target-dir=/tmp/backup
+mysqladmin --socket=/var/run/mysqld/mysqld.sock -u root shutdown`
+	if out, err := exec.CommandContext(ctx, "docker", "exec", id, "sh", "-c", seedScript).CombinedOutput(); err != nil {
+		t.Fatalf("seed xtrabackup fixture: %v: %s", err, out)
+	}
+	if out, err := exec.CommandContext(ctx, "docker", "cp", id+":/tmp/backup", dest).CombinedOutput(); err != nil {
+		t.Fatalf("extract backup: %v: %s", err, out)
+	}
+}
+
 // makeFixture seeds the default database with 500 rows and extracts a real
 // mysqldump file to the host.
 func makeFixture(t *testing.T, ctx context.Context, provider *docker.Provider, dest string) {
