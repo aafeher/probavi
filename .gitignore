@@ -1,0 +1,21 @@
+# Binaries and build output
+/probavi
+/dist/
+*.exe
+
+# Test and coverage artifacts
+*.test
+coverage.out
+
+# Generated PoC fixtures (created by poc/make-fixture.sh)
+/poc/testdata/
+
+# Local evidence logs and keys (never commit!)
+*.jsonl
+*.key
+*.pem
+
+# Editor/OS noise
+.idea/
+.vscode/
+.DS_Store

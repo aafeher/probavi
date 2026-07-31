@@ -1,0 +1,35 @@
+---
+name: go-standards
+description: Probavi's Go coding standards, repository conventions, and review checklist. Use this skill for ANY code change in this repository — writing new Go code, refactoring, adding dependencies, writing tests, creating commits or PRs — even small ones. Also use it when deciding where a new package or file should live in the directory layout.
+---
+
+# Probavi Go standards
+
+Full standards live in `AGENTS.md` §3 — read that section if you have not in this session. This skill is the working checklist.
+
+## Layout
+
+- `cmd/probavi/` — main package only: flag parsing, wiring, exit codes. No business logic.
+- `internal/core` orchestration · `internal/config` YAML config · `internal/adapter` protocol client · `internal/sandbox` providers · `internal/checks` validations · `internal/evidence` trust core · `internal/metrics` Prometheus.
+- `adapters/<engine>/` — external adapter processes (separate module allowed).
+- New package? Justify why existing ones don't fit; prefer fewer, cohesive packages.
+
+## Code checklist (apply to every change)
+
+- [ ] `gofmt`/`goimports` clean; `golangci-lint run` zero warnings.
+- [ ] Errors wrapped with context (`%w`); no swallowed errors; sentinel/typed errors at package boundaries.
+- [ ] Every blocking call takes `context.Context` and honors cancellation — drills must be killable.
+- [ ] No global mutable state; dependencies injected via constructors; interfaces defined at the consumer.
+- [ ] Resource cleanup on ALL paths (`defer` + timeout contexts); for sandbox/Docker resources also label + orphan-sweep.
+- [ ] Logs: structured, no secrets, stderr; stdout is reserved (protocol streams, machine-readable output).
+- [ ] Table-driven tests for new logic; integration tests behind `//go:build integration`. Tests ship in the same PR as the change — "tests later" does not exist.
+- [ ] `go test -race ./...` passes; coverage does not decrease (near-100% for `internal/evidence` and `internal/adapter`).
+- [ ] New dependency? One-line justification required; prefer stdlib; pin versions; `govulncheck` clean.
+- [ ] Never lower, disable, or bypass a quality gate (linter suppression, skipped test, coverage exclusion) to make something pass — that is design feedback; fix the design.
+
+## Commits and PRs
+
+- Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`), imperative mood, body explains why.
+- One vertical slice per PR where possible (config → run → evidence), not horizontal layers.
+- Update `ROADMAP.md` checkboxes and keep `README.md` examples honest (mark aspirational ones).
+- Specs (`docs/`) change BEFORE code when the adapter protocol or evidence schema is affected — see the adapter-development and evidence-integrity skills, which override this one where they are stricter.

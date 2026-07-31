@@ -1,0 +1,97 @@
+# Probavi CI — the quality gates of AGENTS.md §3.1, mechanized.
+# Every gate blocks merge; gates are never lowered to make a change pass.
+# Third-party actions are pinned to commit SHAs (supply-chain rule, §3.3);
+# Go tools are installed via `go install` with pinned versions so the module
+# proxy + checksum database verify them (no curl|sh).
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Format and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "files not gofmt-clean:"; echo "$out"; exit 1
+          fi
+      - name: go.mod / go.sum tidy
+        run: go mod tidy -diff
+      - name: golangci-lint
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+          golangci-lint run --timeout 5m
+
+  test:
+    name: Unit tests (race, coverage ratchet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: build
+        run: go build ./...
+      - name: test with race detector and coverage
+        run: go test -race -coverprofile=cover.out -coverpkg=./internal/... ./...
+      - name: coverage ratchet
+        # .coverage-floor holds the committed minimum for ./internal/...
+        # coverage. PRs that raise coverage may raise the floor; lowering it
+        # is never acceptable — that is the "coverage must not decrease"
+        # gate of AGENTS.md §3.1.
+        run: |
+          total=$(go tool cover -func=cover.out | awk '/^total:/ {sub(/%/, "", $3); print $3}')
+          floor=$(cat .coverage-floor)
+          echo "internal coverage: ${total}% (committed floor: ${floor}%)"
+          if ! awk -v t="$total" -v f="$floor" 'BEGIN {exit (t + 0 >= f + 0) ? 0 : 1}'; then
+            echo "::error::coverage ${total}% fell below the committed floor ${floor}% — add tests; never lower the floor"
+            exit 1
+          fi
+
+  integration:
+    name: Integration tests (real Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: integration tests
+        run: go test -race -tags integration ./...
+
+  vulncheck:
+    name: Known-vulnerability scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        # Deliberately @latest: a vulnerability scanner is only useful when
+        # current, and the tool version does not affect build outputs.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

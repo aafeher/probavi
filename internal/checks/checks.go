@@ -1,0 +1,255 @@
+// Package checks executes drill validation checks against a restored
+// database — through the adapter-declared sql_runner template and the
+// sandbox exec verb, so the core never learns an engine concept. Verdicts
+// are per-check; only infrastructure failures abort a run.
+//
+// Details obey the evidence redaction rules (evidence-schema.md §8):
+// aggregates (counts, ages, latencies) yes, query result values no.
+package checks
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/aafeher/probavi/internal/config"
+	"github.com/aafeher/probavi/internal/sandbox"
+)
+
+const maxDetailLen = 200
+
+var identPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// Execer runs one command inside the sandbox; *docker.Sandbox implements it.
+type Execer interface {
+	Exec(ctx context.Context, req sandbox.ExecRequest) (*sandbox.ExecResult, error)
+}
+
+// Runner is the sql_runner template from the adapter's probe response
+// (adapter protocol §6.1).
+type Runner struct {
+	Argv []string
+	Env  map[string]string
+}
+
+// Target identifies the restored database from the provision result.
+// Password carries the resolved secret value for {{password}} substitution
+// in runner env values — it must never appear in argv, results, or logs.
+type Target struct {
+	User     string
+	Database string
+	Password string
+}
+
+// Deps are the injected collaborators for one check run.
+type Deps struct {
+	Exec Execer
+	// Healthcheck runs the adapter's healthcheck operation; the
+	// service_healthy builtin delegates to it.
+	Healthcheck func(ctx context.Context) (healthy bool, detail string, err error)
+	Runner      Runner
+	Target      Target
+	// Now is injectable for freshness tests; nil means time.Now.
+	Now func() time.Time
+}
+
+// Result is one executed check, ready to be mapped into an evidence record.
+type Result struct {
+	Name     string
+	OK       bool
+	Detail   string
+	Duration time.Duration
+}
+
+// Run executes every check in order. A false verdict does not stop the run
+// — evidence records each check individually; the returned error is
+// reserved for infrastructure failures (sandbox death, invalid template),
+// after which the partial results are still returned.
+func Run(ctx context.Context, list []config.Check, deps Deps) ([]Result, error) {
+	if deps.Now == nil {
+		deps.Now = time.Now
+	}
+	results := make([]Result, 0, len(list))
+	for i := range list {
+		res, err := runOne(ctx, &list[i], i, &deps)
+		if err != nil {
+			return results, fmt.Errorf("check %s: %w", checkName(&list[i], i), err)
+		}
+		results = append(results, *res)
+	}
+	return results, nil
+}
+
+func runOne(ctx context.Context, c *config.Check, i int, deps *Deps) (*Result, error) {
+	start := time.Now()
+	var (
+		ok     bool
+		detail string
+		err    error
+	)
+	switch {
+	case c.SQL != "":
+		ok, detail, err = runSQL(ctx, deps, c.SQL, c.Expect.String())
+	case c.Builtin == "service_healthy":
+		ok, detail, err = deps.Healthcheck(ctx)
+	case c.Builtin == "table_exists":
+		ok, detail, err = runTableExists(ctx, deps, c.Table)
+	case c.Builtin == "row_count":
+		ok, detail, err = runRowCount(ctx, deps, c)
+	case c.Builtin == "freshness":
+		ok, detail, err = runFreshness(ctx, deps, c)
+	default:
+		// config.Load validates check shapes; reaching this is a bug.
+		err = fmt.Errorf("unrunnable check configuration")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &Result{
+		Name:     checkName(c, i),
+		OK:       ok,
+		Detail:   truncateDetail(detail),
+		Duration: time.Since(start),
+	}, nil
+}
+
+// checkName derives the evidence record name (evidence-schema.md §3).
+func checkName(c *config.Check, i int) string {
+	if c.SQL != "" {
+		if c.Name != "" {
+			return "sql:" + c.Name
+		}
+		return "sql:" + strconv.Itoa(i)
+	}
+	switch c.Builtin {
+	case "table_exists", "row_count":
+		return c.Builtin + ":" + c.Table
+	case "freshness":
+		return c.Builtin + ":" + c.Table + "." + c.Column
+	default:
+		return c.Builtin
+	}
+}
+
+func runTableExists(ctx context.Context, deps *Deps, table string) (bool, string, error) {
+	ident, err := quoteIdent(table)
+	if err != nil {
+		return false, "", err
+	}
+	out, qerr := query(ctx, deps, "SELECT count(*) FROM "+ident+" WHERE 1=0")
+	if qerr != nil {
+		return false, "", qerr
+	}
+	if !out.succeeded {
+		return false, "table is not queryable: " + out.errLine, nil
+	}
+	return true, "table exists", nil
+}
+
+func runRowCount(ctx context.Context, deps *Deps, c *config.Check) (bool, string, error) {
+	ident, err := quoteIdent(c.Table)
+	if err != nil {
+		return false, "", err
+	}
+	out, qerr := query(ctx, deps, "SELECT count(*) FROM "+ident)
+	if qerr != nil {
+		return false, "", qerr
+	}
+	if !out.succeeded {
+		return false, "count query failed: " + out.errLine, nil
+	}
+	n, perr := strconv.ParseInt(out.value, 10, 64)
+	if perr != nil {
+		return false, "count query returned unexpected output", nil
+	}
+	ok := (c.Min == nil || n >= *c.Min) && (c.Max == nil || n <= *c.Max)
+	return ok, fmt.Sprintf("%d rows (%s)", n, boundsText(c.Min, c.Max)), nil
+}
+
+func runFreshness(ctx context.Context, deps *Deps, c *config.Check) (bool, string, error) {
+	table, err := quoteIdent(c.Table)
+	if err != nil {
+		return false, "", err
+	}
+	column, err := quoteIdent(c.Column)
+	if err != nil {
+		return false, "", err
+	}
+	out, qerr := query(ctx, deps, "SELECT max("+column+") FROM "+table)
+	if qerr != nil {
+		return false, "", qerr
+	}
+	if !out.succeeded {
+		return false, "freshness query failed: " + out.errLine, nil
+	}
+	if out.value == "" {
+		return false, "table has no rows or only NULL timestamps", nil
+	}
+	newest, perr := parseTimestamp(out.value)
+	if perr != nil {
+		return false, "timestamp column returned unparseable output", nil
+	}
+	age := deps.Now().Sub(newest)
+	if age < 0 {
+		age = 0
+	}
+	maxAge := c.MaxAge.Std()
+	return age <= maxAge, fmt.Sprintf("newest row is %s old (max_age %s)",
+		age.Truncate(time.Second), maxAge), nil
+}
+
+func runSQL(ctx context.Context, deps *Deps, sql, expect string) (bool, string, error) {
+	out, qerr := query(ctx, deps, sql)
+	if qerr != nil {
+		return false, "", qerr
+	}
+	if !out.succeeded {
+		return false, "query failed: " + out.errLine, nil
+	}
+	// Redaction: never embed the returned value — a custom query may
+	// select anything; the check name identifies what mismatched.
+	if out.value != expect {
+		return false, "query returned a different value than expected", nil
+	}
+	return true, "matched expectation", nil
+}
+
+func boundsText(minBound, maxBound *int64) string {
+	switch {
+	case minBound != nil && maxBound != nil:
+		return fmt.Sprintf("min %d, max %d", *minBound, *maxBound)
+	case minBound != nil:
+		return fmt.Sprintf("min %d", *minBound)
+	default:
+		return fmt.Sprintf("max %d", *maxBound)
+	}
+}
+
+// quoteIdent validates and quotes a possibly schema-qualified identifier.
+// Strict validation makes SQL injection through config impossible — the
+// sandbox is disposable, but evidence must never record a poisoned check.
+func quoteIdent(name string) (string, error) {
+	parts := strings.Split(name, ".")
+	if len(parts) > 2 {
+		return "", fmt.Errorf("invalid identifier %s: at most schema.name", name)
+	}
+	for i, p := range parts {
+		if !identPattern.MatchString(p) {
+			return "", fmt.Errorf("invalid identifier: %s", name)
+		}
+		parts[i] = `"` + p + `"`
+	}
+	return strings.Join(parts, "."), nil
+}
+
+// truncateDetail keeps details inside the evidence limit with room to
+// spare; the byte-precise cap is enforced by the evidence package.
+func truncateDetail(s string) string {
+	if len(s) <= maxDetailLen {
+		return s
+	}
+	return s[:maxDetailLen-3] + "..."
+}

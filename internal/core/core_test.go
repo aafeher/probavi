@@ -1,0 +1,443 @@
+package core
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/aafeher/probavi/internal/adapter"
+	"github.com/aafeher/probavi/internal/config"
+	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/aafeher/probavi/internal/sandbox"
+)
+
+// --- fakes -----------------------------------------------------------------
+
+type fakeAdapter struct {
+	probe       *adapter.ProbeResult
+	probeErr    error
+	provRes     *adapter.ProvisionResult
+	provErr     error
+	healthy     bool
+	healthEr    error
+	teardownErr error
+
+	teardownReasons []string
+	teardownStates  []string
+}
+
+func (f *fakeAdapter) Probe(context.Context) (*adapter.ProbeResult, error) {
+	return f.probe, f.probeErr
+}
+
+func (f *fakeAdapter) Provision(context.Context, *adapter.ProvisionRequest, adapter.SandboxVerbs) (*adapter.ProvisionResult, error) {
+	return f.provRes, f.provErr
+}
+
+func (f *fakeAdapter) Healthcheck(context.Context, *adapter.Connection, json.RawMessage, adapter.SandboxVerbs) (*adapter.HealthcheckResult, error) {
+	if f.healthEr != nil {
+		return nil, f.healthEr
+	}
+	return &adapter.HealthcheckResult{Healthy: f.healthy, Detail: "checked"}, nil
+}
+
+func (f *fakeAdapter) Teardown(_ context.Context, state json.RawMessage, reason string, _ adapter.SandboxVerbs) (*adapter.TeardownResult, error) {
+	f.teardownReasons = append(f.teardownReasons, reason)
+	f.teardownStates = append(f.teardownStates, string(state))
+	if f.teardownErr != nil {
+		return nil, f.teardownErr
+	}
+	return &adapter.TeardownResult{Released: true}, nil
+}
+
+type fakeSandbox struct {
+	execRequests []sandbox.ExecRequest
+	execValue    string
+	destroyed    int
+	destroyErr   error
+}
+
+func (f *fakeSandbox) Exec(_ context.Context, req sandbox.ExecRequest) (*sandbox.ExecResult, error) {
+	f.execRequests = append(f.execRequests, req)
+	return &sandbox.ExecResult{ExitCode: 0, Stdout: []byte(f.execValue + "\n")}, nil
+}
+
+func (f *fakeSandbox) PutFile(context.Context, string, string, string) (*sandbox.PutFileResult, error) {
+	return &sandbox.PutFileResult{}, nil
+}
+
+func (f *fakeSandbox) ID() string                    { return "sbx-1" }
+func (f *fakeSandbox) ScratchDir() string            { return "/tmp" }
+func (f *fakeSandbox) Destroy(context.Context) error { f.destroyed++; return f.destroyErr }
+
+type fakeProvider struct {
+	sbx       *fakeSandbox
+	createErr error
+	created   int
+	swept     int
+}
+
+func (f *fakeProvider) Create(context.Context, map[string]string) (Sandbox, error) {
+	f.created++
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
+	return f.sbx, nil
+}
+
+func (f *fakeProvider) SweepOrphans(context.Context) ([]string, error) {
+	f.swept++
+	return nil, nil
+}
+
+type failingStore struct{ err error }
+
+func (s failingStore) Append(*evidence.Record) error { return s.err }
+
+// --- fixtures ----------------------------------------------------------------
+
+func testConfig() *config.Config {
+	return &config.Config{
+		Target: config.Target{
+			Name:    "prod-orders-db",
+			Adapter: "postgres",
+			Source:  config.Source{Kind: "pgdump", Path: "/backups/orders.dump"},
+		},
+		Sandbox: config.Sandbox{Provider: "docker", Params: map[string]string{"image": "postgres:16"}},
+		Checks: []config.Check{
+			{Builtin: "service_healthy"},
+			{SQL: "SELECT 1", Expect: config.ScalarFromString("1")},
+		},
+		Hash: "sha256:" + strings.Repeat("7d", 32),
+	}
+}
+
+func testProbe() *adapter.ProbeResult {
+	return &adapter.ProbeResult{
+		Name:             "postgres",
+		AdapterVersion:   "0.1.0",
+		ProtocolVersions: []string{adapter.ProtocolVersion},
+		Sources:          []adapter.SourceKind{{Kind: "pgdump"}},
+		SQLRunner: adapter.SQLRunner{
+			Argv: []string{"psql", "-U", "{{user}}", "-c", "{{sql}}"},
+			Env:  map[string]string{"PGPASSWORD": "{{password}}"},
+		},
+	}
+}
+
+func testProvision() *adapter.ProvisionResult {
+	created := "2026-07-30T01:58:02.000Z"
+	return &adapter.ProvisionResult{
+		Connection: adapter.Connection{
+			Scheme: "postgresql", Host: "127.0.0.1", Port: 5432,
+			Database: "postgres", User: "postgres", PasswordEnv: "PROBAVI_SANDBOX_PASSWORD",
+		},
+		SourceIdentity: adapter.SourceIdentity{
+			Checksum: "sha256:" + strings.Repeat("9f", 32), SizeBytes: 565248, CreatedAt: &created,
+		},
+		Timings: adapter.Timings{EngineReadySeconds: 1.1665, TransferSeconds: 0.11, RestoreSeconds: 0.19},
+		State:   json.RawMessage(`{"database":"postgres"}`),
+	}
+}
+
+// newDrill wires a Drill against fakes and a REAL evidence store, so every
+// record the core produces passes full schema validation and signing.
+func newDrill(t *testing.T, fa *fakeAdapter, fp *fakeProvider) (*Drill, string) {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "evidence.jsonl")
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i)
+	}
+	store, err := evidence.Open(logPath, evidence.NewSignerFromSeed(seed), nil)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
+	base := time.Date(2026, 7, 31, 2, 0, 0, 0, time.UTC)
+	tick := 0
+	return &Drill{
+		Config:          testConfig(),
+		Adapter:         fa,
+		Provider:        fp,
+		Store:           store,
+		Version:         "test",
+		SandboxPassword: "ephemeral-secret",
+		Now: func() time.Time {
+			tick++
+			return base.Add(time.Duration(tick) * 50 * time.Millisecond)
+		},
+		Hostname: func() (string, error) { return "drill-host", nil },
+	}, logPath
+}
+
+func i64v(p *int64) int64 {
+	if p == nil {
+		return -1
+	}
+	return *p
+}
+
+// --- tests -------------------------------------------------------------------
+
+func TestRunPass(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
+	d, logPath := newDrill(t, fa, fp)
+
+	rec, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Outcome != evidence.OutcomePass || rec.Error != nil || rec.Seq != 1 || rec.Sig == nil {
+		t.Fatalf("record = outcome %s seq %d err %+v", rec.Outcome, rec.Seq, rec.Error)
+	}
+	assertPassRecord(t, rec)
+	assertPassCleanup(t, fa, fp)
+	assertLogVerifies(t, logPath)
+}
+
+func assertPassRecord(t *testing.T, rec *evidence.Record) {
+	t.Helper()
+	if *rec.Adapter.Version != "0.1.0" || *rec.Backup.Checksum != "sha256:"+strings.Repeat("9f", 32) {
+		t.Errorf("identity fields: adapter=%v backup=%v", rec.Adapter, rec.Backup)
+	}
+	// Rounding: 1.1665 s → 1167 ms (round half away from zero), 0.19 → 190.
+	if i64v(rec.Timings.EngineReady) != 1167 || i64v(rec.Timings.Restore) != 190 || i64v(rec.Timings.Transfer) != 110 {
+		t.Errorf("timings = ready %d transfer %d restore %d", i64v(rec.Timings.EngineReady), i64v(rec.Timings.Transfer), i64v(rec.Timings.Restore))
+	}
+	if i64v(rec.Timings.Provision) < 0 || i64v(rec.Timings.Validate) < 0 || i64v(rec.Timings.Total) <= 0 {
+		t.Errorf("core-measured timings missing: %+v", rec.Timings)
+	}
+	if len(rec.Checks) != 2 || !rec.Checks[0].OK || !rec.Checks[1].OK {
+		t.Errorf("checks = %+v", rec.Checks)
+	}
+}
+
+func assertPassCleanup(t *testing.T, fa *fakeAdapter, fp *fakeProvider) {
+	t.Helper()
+	if fa.teardownReasons[0] != "completed" || fp.sbx.destroyed != 1 || fp.swept != 1 {
+		t.Errorf("cleanup: teardowns=%v destroyed=%d swept=%d", fa.teardownReasons, fp.sbx.destroyed, fp.swept)
+	}
+	// The ephemeral password must reach the sql_runner env, and only there.
+	last := fp.sbx.execRequests[len(fp.sbx.execRequests)-1]
+	if last.Env["PGPASSWORD"] != "ephemeral-secret" {
+		t.Errorf("sql_runner env = %v — password_env resolution broken", last.Env)
+	}
+	if strings.Contains(strings.Join(last.Argv, " "), "ephemeral-secret") {
+		t.Error("password leaked into argv")
+	}
+}
+
+func assertLogVerifies(t *testing.T, logPath string) {
+	t.Helper()
+	f, err := os.Open(logPath)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close log: %v", err)
+		}
+	}()
+	res, err := evidence.Verify(f, evidence.NewKeyring(evidence.NewSignerFromSeed(seed32()).PublicKey()))
+	if err != nil || res.Status != evidence.StatusValid || res.Records != 1 {
+		t.Errorf("evidence verify = %+v err=%v", res, err)
+	}
+}
+
+func seed32() []byte {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i)
+	}
+	return seed
+}
+
+func TestRunOutcomes(t *testing.T) {
+	tests := []struct {
+		name         string
+		mutate       func(fa *fakeAdapter, fp *fakeProvider)
+		wantOutcome  evidence.Outcome
+		wantCode     string
+		wantTeardown string // "" = teardown must not run
+	}{
+		{"provision source corrupt is a fail verdict",
+			func(fa *fakeAdapter, fp *fakeProvider) {
+				fa.provRes = nil
+				fa.provErr = &adapter.Error{Code: "source_corrupt", Message: "bad archive"}
+			}, evidence.OutcomeFail, "source_corrupt", "failed"},
+		{"check verdict failure",
+			func(fa *fakeAdapter, fp *fakeProvider) { fp.sbx.execValue = "2" },
+			evidence.OutcomeFail, "check_failed", "failed"},
+		{"check infrastructure failure",
+			func(fa *fakeAdapter, fp *fakeProvider) {
+				fa.healthEr = &adapter.Error{Code: "adapter_crash", Message: "boom"}
+			}, evidence.OutcomeError, "adapter_crash", "failed"},
+		{"probe failure",
+			func(fa *fakeAdapter, fp *fakeProvider) {
+				fa.probe = nil
+				fa.probeErr = &adapter.Error{Code: "adapter_crash", Message: "no binary"}
+			}, evidence.OutcomeError, "adapter_crash", ""},
+		{"unsupported source kind",
+			func(fa *fakeAdapter, fp *fakeProvider) { fa.probe.Sources = []adapter.SourceKind{{Kind: "walg"}} },
+			evidence.OutcomeError, "unsupported_source", ""},
+		{"sandbox create failure",
+			func(fa *fakeAdapter, fp *fakeProvider) { fp.createErr = errors.New("docker daemon down") },
+			evidence.OutcomeError, "sandbox_error", ""},
+		{"cancelled drill",
+			func(fa *fakeAdapter, fp *fakeProvider) {
+				fa.provRes = nil
+				fa.provErr = &adapter.Error{Code: "cancelled", Message: "stopping"}
+			}, evidence.OutcomeCancelled, "cancelled", "cancelled"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+			fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
+			tt.mutate(fa, fp)
+			assertOutcome(t, fa, fp, tt.wantOutcome, tt.wantCode, tt.wantTeardown)
+		})
+	}
+}
+
+func assertOutcome(t *testing.T, fa *fakeAdapter, fp *fakeProvider, wantOutcome evidence.Outcome, wantCode, wantTeardown string) {
+	t.Helper()
+	d, _ := newDrill(t, fa, fp)
+	rec, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Outcome != wantOutcome || rec.Error == nil || rec.Error.Code != wantCode {
+		t.Errorf("record = %s / %+v, want %s / %s", rec.Outcome, rec.Error, wantOutcome, wantCode)
+	}
+	if wantTeardown == "" {
+		if len(fa.teardownReasons) != 0 {
+			t.Errorf("teardown ran (%v) although provision was never attempted", fa.teardownReasons)
+		}
+	} else if len(fa.teardownReasons) != 1 || fa.teardownReasons[0] != wantTeardown {
+		t.Errorf("teardown reasons = %v, want [%s]", fa.teardownReasons, wantTeardown)
+	}
+	if fp.created > 0 && fp.createErr == nil && fp.sbx.destroyed != 1 {
+		t.Error("created sandbox was not destroyed")
+	}
+}
+
+func TestRunTimeoutClassification(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(),
+		provErr: &adapter.Error{Code: "adapter_crash", Message: "killed"}}
+	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
+	d, _ := newDrill(t, fa, fp)
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	rec, err := d.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Outcome != evidence.OutcomeError || rec.Error.Code != "timeout" {
+		t.Errorf("record = %s / %+v, want error/timeout — wall-clock death must be identifiable", rec.Outcome, rec.Error)
+	}
+	if fa.teardownReasons[0] != "timeout" {
+		t.Errorf("teardown reason = %v, want timeout", fa.teardownReasons)
+	}
+}
+
+func TestRunCrashBeforeProvisionStateIsEmptyObject(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(),
+		provErr: &adapter.Error{Code: "adapter_crash", Message: "died mid-provision"}}
+	fp := &fakeProvider{sbx: &fakeSandbox{}}
+	d, _ := newDrill(t, fa, fp)
+
+	if _, err := d.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// The protocol client normalizes nil state to {} (§6.4); the core must
+	// still call teardown after a provision crash.
+	if len(fa.teardownStates) != 1 {
+		t.Fatalf("teardown did not run after provision crash")
+	}
+}
+
+func TestRunAppendFailureIsFatal(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
+	d, _ := newDrill(t, fa, fp)
+	d.Store = failingStore{err: errors.New("disk full")}
+
+	_, err := d.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "left no evidence") {
+		t.Errorf("err = %v — a lost record is the highest-severity failure and must surface", err)
+	}
+}
+
+func TestRunWithDefaultsAndCleanupFailures(t *testing.T) {
+	// Nil Logger/Now/Hostname take defaults; teardown and destroy failures
+	// are logged, never overriding the drill verdict; nil sandbox params
+	// normalize to an empty object so the record still validates.
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true,
+		teardownErr: errors.New("adapter teardown broke")}
+	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1", destroyErr: errors.New("rm failed")}}
+	d, _ := newDrill(t, fa, fp)
+	d.Logger, d.Now, d.Hostname = nil, nil, nil
+	d.Config.Sandbox.Params = nil
+
+	rec, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Outcome != evidence.OutcomePass {
+		t.Errorf("outcome = %s — cleanup failures must not change the verdict", rec.Outcome)
+	}
+	if rec.Sandbox.Params == nil {
+		t.Error("nil sandbox params must normalize to an empty object")
+	}
+}
+
+func TestResolvePassword(t *testing.T) {
+	d := &Drill{SandboxPassword: "generated"}
+	if got := d.resolvePassword(""); got != "" {
+		t.Errorf("empty password_env = %q", got)
+	}
+	if got := d.resolvePassword("PROBAVI_SANDBOX_PASSWORD"); got != "generated" {
+		t.Errorf("core-generated password_env = %q", got)
+	}
+	t.Setenv("PROBAVI_TEST_DB_PW", "inherited")
+	if got := d.resolvePassword("PROBAVI_TEST_DB_PW"); got != "inherited" {
+		t.Errorf("inherited password_env = %q", got)
+	}
+}
+
+func TestSanitizeMessage(t *testing.T) {
+	if got := sanitizeMessage("line1\nline2\rline3"); got != "line1 line2 line3" {
+		t.Errorf("sanitizeMessage = %q", got)
+	}
+	long := sanitizeMessage(strings.Repeat("m", 600))
+	if len(long) != 500 || !strings.HasSuffix(long, "...") {
+		t.Errorf("long message: len=%d", len(long))
+	}
+}
+
+func TestHostIDFallback(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
+	d, _ := newDrill(t, fa, fp)
+	d.Hostname = func() (string, error) { return "", errors.New("no hostname") }
+
+	rec, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(rec.Env.HostID) != 16 {
+		t.Errorf("host_id = %q, want 16 hex chars even without a hostname", rec.Env.HostID)
+	}
+}

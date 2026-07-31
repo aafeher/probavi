@@ -1,0 +1,95 @@
+# Probavi lint configuration — deliberately strict (AGENTS.md §3.1).
+# Zero warnings policy on main; gates are never lowered to make code pass.
+
+run:
+  timeout: 5m
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - gosimple
+    - unused
+    - errcheck
+    - errorlint
+    - ineffassign
+    - unconvert
+    - unparam
+    - gosec
+    - gocritic
+    - gocyclo
+    - gocognit
+    - revive
+    - misspell
+    - prealloc
+    - copyloopvar
+    - intrange
+    - nolintlint
+    - gofmt
+    - goimports
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    # Policy, not a dodge: fmt.Fprint* is used solely for diagnostics
+    # (stderr, usage text). A failed diagnostic write has nowhere left to
+    # be reported. Durable writes never go through fmt — they use explicit
+    # Write/Sync with checked errors (see internal/evidence/store.go).
+    exclude-functions:
+      - fmt.Fprint
+      - fmt.Fprintf
+      - fmt.Fprintln
+  gosec:
+    excludes:
+      # G304 (file inclusion via variable) targets tainted-input paths in
+      # networked services. Probavi is an operator-driven CLI: every opened
+      # path is explicitly operator-supplied (key files, evidence logs,
+      # drill configs), so G304 would flag every legitimate file operation.
+      # Scoped policy decision, not a per-finding suppression.
+      - G304
+      # G204 (subprocess with variable input) — same class: launching
+      # operator-configured executables IS the product (adapter binaries
+      # resolved from the validated drill config, the docker CLI). Argv is
+      # always a []string, never a shell string.
+      - G204
+  gocyclo:
+    min-complexity: 15
+  gocognit:
+    min-complexity: 20
+  nolintlint:
+    require-explanation: true
+    require-specific: true
+  revive:
+    rules:
+      - name: exported
+      - name: package-comments
+      - name: error-strings
+      - name: error-naming
+      - name: context-as-argument
+      - name: increment-decrement
+      - name: indent-error-flow
+      - name: unexported-return
+      - name: blank-imports
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: var-naming
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Test fixtures legitimately contain fixed keys and generated files.
+    - path: _test\.go
+      linters:
+        - gosec
+    # The Prometheus textfile must be world-readable: node_exporter runs
+    # as its own user and the file carries no secrets by design. Key files
+    # elsewhere keep full G306 protection.
+    - path: internal/metrics/
+      linters:
+        - gosec
+      text: "G306"

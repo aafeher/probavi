@@ -1,0 +1,380 @@
+// Package core orchestrates one drill: sandbox up, adapter-driven restore,
+// checks, guaranteed teardown — and exactly one signed evidence record at
+// the end, whatever happened in between. A drill that leaves no record is
+// the highest-severity bug (evidence-schema.md §7); this package is built
+// around that invariant.
+package core
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"math"
+	"os"
+	"runtime"
+	"time"
+
+	"github.com/aafeher/probavi/internal/adapter"
+	"github.com/aafeher/probavi/internal/checks"
+	"github.com/aafeher/probavi/internal/config"
+	"github.com/aafeher/probavi/internal/evidence"
+)
+
+// teardownGrace bounds cleanup work that runs after the drill context is
+// already dead (PoC finding 3: cleanup never depends on the drill's fate).
+const teardownGrace = 60 * time.Second
+
+// AdapterClient is what the core needs from the adapter protocol client.
+type AdapterClient interface {
+	Probe(ctx context.Context) (*adapter.ProbeResult, error)
+	Provision(ctx context.Context, req *adapter.ProvisionRequest, verbs adapter.SandboxVerbs) (*adapter.ProvisionResult, error)
+	Healthcheck(ctx context.Context, conn *adapter.Connection, state json.RawMessage, verbs adapter.SandboxVerbs) (*adapter.HealthcheckResult, error)
+	Teardown(ctx context.Context, state json.RawMessage, reason string, verbs adapter.SandboxVerbs) (*adapter.TeardownResult, error)
+}
+
+// Sandbox is one disposable runtime as the core sees it.
+type Sandbox interface {
+	adapter.SandboxVerbs
+	ID() string
+	ScratchDir() string
+	Destroy(ctx context.Context) error
+}
+
+// Provider creates sandboxes and sweeps the orphans of crashed runs.
+type Provider interface {
+	Create(ctx context.Context, params map[string]string) (Sandbox, error)
+	SweepOrphans(ctx context.Context) ([]string, error)
+}
+
+// Appender is the evidence store surface the core needs.
+type Appender interface {
+	Append(rec *evidence.Record) error
+}
+
+// Drill wires one drill run. All collaborators are injected.
+type Drill struct {
+	Config   *config.Config
+	Adapter  AdapterClient
+	Provider Provider
+	Store    Appender
+	Logger   *slog.Logger
+	Version  string
+	// SandboxPassword is the ephemeral per-drill secret the core generated
+	// (adapter protocol §2.5); checks use it when the adapter's connection
+	// names it as password_env.
+	SandboxPassword string
+
+	Now      func() time.Time
+	Hostname func() (string, error)
+}
+
+// Run executes the drill and appends exactly one signed evidence record.
+// The record carries the verdict; the returned error is reserved for the
+// one unforgivable failure — the record could not be written.
+func (d *Drill) Run(ctx context.Context) (*evidence.Record, error) {
+	d.defaults()
+	start := d.Now()
+	rec := d.baseRecord()
+
+	d.execute(ctx, rec)
+
+	rec.Timings.Total = msSince(start, d.Now())
+	rec.TS = d.Now().UTC().Format(evidence.TimestampFormat)
+	if err := d.Store.Append(rec); err != nil {
+		return rec, fmt.Errorf("append evidence record (a drill ran but left no evidence — highest severity): %w", err)
+	}
+	d.Logger.Info("evidence record appended", "seq", rec.Seq, "outcome", rec.Outcome)
+	return rec, nil
+}
+
+func (d *Drill) defaults() {
+	if d.Logger == nil {
+		d.Logger = slog.New(slog.DiscardHandler)
+	}
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	if d.Hostname == nil {
+		d.Hostname = os.Hostname
+	}
+}
+
+// baseRecord pre-fills everything knowable before the drill starts, so any
+// abort still produces a complete, valid record with nulls for the unknown.
+func (d *Drill) baseRecord() *evidence.Record {
+	cfg := d.Config
+	params := cfg.Sandbox.Params
+	if params == nil {
+		params = map[string]string{}
+	}
+	return &evidence.Record{
+		Schema:  evidence.SchemaID,
+		Drill:   evidence.Drill{Name: cfg.Target.Name, ConfigHash: cfg.Hash},
+		Backup:  evidence.Backup{Kind: cfg.Target.Source.Kind},
+		Adapter: evidence.Adapter{Name: cfg.Target.Adapter, Protocol: adapter.ProtocolVersion},
+		Sandbox: evidence.Sandbox{Provider: cfg.Sandbox.Provider, Params: params},
+		Checks:  []evidence.Check{},
+		Env: evidence.Env{
+			ProbaviVersion: d.Version,
+			OS:             runtime.GOOS,
+			Arch:           runtime.GOARCH,
+			HostID:         d.hostID(),
+		},
+	}
+}
+
+// execute runs the drill phases and fills rec with outcome, error, checks,
+// and timings. It never returns an error: every failure becomes record
+// content.
+func (d *Drill) execute(ctx context.Context, rec *evidence.Record) {
+	if removed, err := d.Provider.SweepOrphans(ctx); err != nil {
+		d.Logger.Warn("orphan sweep failed", "err", err)
+	} else if len(removed) > 0 {
+		d.Logger.Info("swept orphan sandboxes", "removed", removed)
+	}
+
+	probe, err := d.Adapter.Probe(ctx)
+	if err != nil {
+		d.classify(ctx, rec, err)
+		return
+	}
+	rec.Adapter.Version = &probe.AdapterVersion
+	if !supportsKind(probe, d.Config.Target.Source.Kind) {
+		rec.Outcome = evidence.OutcomeError
+		rec.Error = &evidence.DrillError{Code: "unsupported_source",
+			Message: fmt.Sprintf("adapter %s does not support source kind %s", probe.Name, d.Config.Target.Source.Kind)}
+		return
+	}
+
+	provisionStart := d.Now()
+	sbx, err := d.Provider.Create(ctx, d.Config.Sandbox.Params)
+	if err != nil {
+		d.classify(ctx, rec, fmt.Errorf("create sandbox: %w", err))
+		if rec.Error != nil && rec.Error.Code == "internal" {
+			rec.Error.Code = "sandbox_error"
+		}
+		return
+	}
+	rec.Timings.Provision = msSince(provisionStart, d.Now())
+	defer d.destroySandbox(sbx)
+
+	provRes, perr := d.Adapter.Provision(ctx, d.provisionRequest(sbx), sbx)
+	defer d.teardown(rec, provRes, sbx)
+	if perr != nil {
+		d.classify(ctx, rec, perr)
+		return
+	}
+	recordProvision(rec, provRes)
+
+	validateStart := d.Now()
+	results, cerr := checks.Run(ctx, d.Config.Checks, d.checkDeps(probe, provRes, sbx))
+	rec.Checks = mapChecks(results)
+	rec.Timings.Validate = msSince(validateStart, d.Now())
+	if cerr != nil {
+		d.classify(ctx, rec, cerr)
+		return
+	}
+	if failed := countFailed(results); failed > 0 {
+		rec.Outcome = evidence.OutcomeFail
+		rec.Error = &evidence.DrillError{Code: "check_failed",
+			Message: fmt.Sprintf("%d of %d checks failed", failed, len(results))}
+		return
+	}
+	rec.Outcome = evidence.OutcomePass
+}
+
+func (d *Drill) provisionRequest(sbx Sandbox) *adapter.ProvisionRequest {
+	src := d.Config.Target.Source
+	return &adapter.ProvisionRequest{
+		Source: adapter.ProvisionSource{
+			Kind:          src.Kind,
+			Path:          src.Path,
+			Params:        src.Params,
+			CredentialEnv: src.CredentialEnv,
+		},
+		Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
+		Options: d.Config.Target.Options,
+	}
+}
+
+func (d *Drill) checkDeps(probe *adapter.ProbeResult, provRes *adapter.ProvisionResult, sbx Sandbox) checks.Deps {
+	return checks.Deps{
+		Exec: sbx,
+		Healthcheck: func(hctx context.Context) (bool, string, error) {
+			res, err := d.Adapter.Healthcheck(hctx, &provRes.Connection, provRes.State, sbx)
+			if err != nil {
+				return false, "", err
+			}
+			return res.Healthy, res.Detail, nil
+		},
+		Runner: checks.Runner{Argv: probe.SQLRunner.Argv, Env: probe.SQLRunner.Env},
+		Target: checks.Target{
+			User:     provRes.Connection.User,
+			Database: provRes.Connection.Database,
+			Password: d.resolvePassword(provRes.Connection.PasswordEnv),
+		},
+		Now: d.Now,
+	}
+}
+
+// resolvePassword turns a connection's password_env NAME into its value:
+// the core-generated ephemeral secret, or an inherited variable.
+func (d *Drill) resolvePassword(passwordEnv string) string {
+	switch passwordEnv {
+	case "":
+		return ""
+	case "PROBAVI_SANDBOX_PASSWORD":
+		return d.SandboxPassword
+	default:
+		v, _ := os.LookupEnv(passwordEnv)
+		return v
+	}
+}
+
+// teardown always runs after a provision attempt — crash included — on a
+// fresh context with its own budget (§2.4, §6.4).
+func (d *Drill) teardown(rec *evidence.Record, provRes *adapter.ProvisionResult, sbx Sandbox) {
+	tctx, cancel := context.WithTimeout(context.Background(), teardownGrace)
+	defer cancel()
+	var state json.RawMessage
+	if provRes != nil {
+		state = provRes.State
+	}
+	if _, err := d.Adapter.Teardown(tctx, state, teardownReason(rec), sbx); err != nil {
+		d.Logger.Error("adapter teardown failed", "err", err)
+	}
+}
+
+func (d *Drill) destroySandbox(sbx Sandbox) {
+	dctx, cancel := context.WithTimeout(context.Background(), teardownGrace)
+	defer cancel()
+	if err := sbx.Destroy(dctx); err != nil {
+		d.Logger.Error("sandbox destroy failed — the next run's orphan sweep will retry", "id", sbx.ID(), "err", err)
+	}
+}
+
+func teardownReason(rec *evidence.Record) string {
+	switch {
+	case rec.Outcome == evidence.OutcomePass:
+		return "completed"
+	case rec.Outcome == evidence.OutcomeCancelled:
+		return "cancelled"
+	case rec.Error != nil && rec.Error.Code == "timeout":
+		return "timeout"
+	default:
+		return "failed"
+	}
+}
+
+// failCodes are the recoverability verdicts of evidence-schema.md §7: the
+// backup or restore is the problem, not the infrastructure.
+var failCodes = map[string]bool{
+	"source_not_found": true, "source_unreadable": true,
+	"source_corrupt": true, "restore_failed": true, "check_failed": true,
+}
+
+// classify converts any drill-phase failure into record content following
+// the §7 outcome taxonomy.
+func (d *Drill) classify(ctx context.Context, rec *evidence.Record, err error) {
+	code, message := "internal", sanitizeMessage(err.Error())
+	var aerr *adapter.Error
+	if errors.As(err, &aerr) {
+		code, message = aerr.Code, sanitizeMessage(aerr.Message)
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		code = "timeout"
+		message = "drill wall-clock limit exceeded: " + message
+	}
+	switch {
+	case failCodes[code]:
+		rec.Outcome = evidence.OutcomeFail
+	case code == "cancelled":
+		rec.Outcome = evidence.OutcomeCancelled
+	default:
+		rec.Outcome = evidence.OutcomeError
+	}
+	rec.Error = &evidence.DrillError{Code: code, Message: message}
+	d.Logger.Error("drill did not pass", "code", code, "outcome", rec.Outcome)
+}
+
+func recordProvision(rec *evidence.Record, res *adapter.ProvisionResult) {
+	rec.Backup.Checksum = &res.SourceIdentity.Checksum
+	rec.Backup.SizeBytes = &res.SourceIdentity.SizeBytes
+	rec.Backup.CreatedAt = res.SourceIdentity.CreatedAt
+	rec.Timings.EngineReady = secondsToMS(res.Timings.EngineReadySeconds)
+	rec.Timings.Transfer = secondsToMS(res.Timings.TransferSeconds)
+	rec.Timings.Restore = secondsToMS(res.Timings.RestoreSeconds)
+}
+
+func mapChecks(results []checks.Result) []evidence.Check {
+	out := make([]evidence.Check, 0, len(results))
+	for _, r := range results {
+		c := evidence.Check{Name: r.Name, OK: r.OK}
+		if r.Detail != "" {
+			detail := r.Detail
+			c.Detail = &detail
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func countFailed(results []checks.Result) int {
+	failed := 0
+	for _, r := range results {
+		if !r.OK {
+			failed++
+		}
+	}
+	return failed
+}
+
+func supportsKind(probe *adapter.ProbeResult, kind string) bool {
+	for _, s := range probe.Sources {
+		if s.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Drill) hostID() string {
+	name, err := d.Hostname()
+	if err != nil {
+		name = "unknown-host"
+	}
+	sum := sha256.Sum256([]byte(name))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// secondsToMS converts adapter-reported seconds to the schema's integer
+// milliseconds, rounding half away from zero (evidence-schema.md §3.1).
+func secondsToMS(s float64) *int64 {
+	ms := int64(math.Round(s * 1000))
+	return &ms
+}
+
+func msSince(start, now time.Time) *int64 {
+	ms := now.Sub(start).Milliseconds()
+	return &ms
+}
+
+// sanitizeMessage keeps failure text single-line and within the evidence
+// limit; quotes are already avoided by the protocol layers.
+func sanitizeMessage(s string) string {
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		if r == '\n' || r == '\r' {
+			r = ' '
+		}
+		out = append(out, r)
+	}
+	if len(out) > 500 {
+		out = append(out[:497], []rune("...")...)
+	}
+	return string(out)
+}

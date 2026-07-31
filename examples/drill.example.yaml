@@ -1,0 +1,46 @@
+# Example Probavi drill configuration.
+# A "drill" = one scheduled restore-verification of one database.
+# This schema is implemented and validated by internal/config; the
+# `probavi run` command that executes drills is still pending (ROADMAP
+# Phase 1). This file is loaded by the config test suite, so it can never
+# drift from the real schema.
+
+target:
+  name: prod-orders-db            # identifies the drill in evidence records
+  adapter: postgres               # resolves to the executable probavi-adapter-postgres
+  source:
+    kind: pgdump                  # adapter-defined; see the adapter's probe output
+    path: /backups/orders/latest.dump
+
+sandbox:
+  provider: docker
+  params:                         # provider-specific, passed through uninterpreted
+    image: postgres:16
+    memory: 2GiB
+  timeout: 30m                    # hard wall-clock limit for the whole drill (required)
+
+checks:
+  - builtin: service_healthy
+  - builtin: table_exists
+    table: orders
+  - builtin: row_count
+    table: orders
+    min: 100000
+  - builtin: freshness            # the "is this backup actually recent?" check
+    table: orders
+    column: created_at
+    max_age: 24h
+  # Custom invariant, named for evidence records. `expect` is compared to
+  # the engine CLI's textual output — prefer numeric results (count-style
+  # queries), which print identically across engines; engine-typed values
+  # like booleans print engine-specifically (PostgreSQL: t/f).
+  - name: no-negative-totals
+    sql: "SELECT count(*) FROM orders WHERE total < 0"
+    expect: 0
+
+evidence:
+  path: /var/lib/probavi/evidence.jsonl
+  sign_key: /etc/probavi/ed25519.key   # generate with: probavi evidence keygen
+
+metrics:
+  prometheus_textfile: /var/lib/node_exporter/probavi.prom

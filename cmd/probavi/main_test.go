@@ -1,0 +1,183 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/aafeher/probavi/internal/evidence"
+)
+
+func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	var out, errBuf bytes.Buffer
+	code = run(args, &out, &errBuf)
+	return code, out.String(), errBuf.String()
+}
+
+func testRecord(ts string) *evidence.Record {
+	detail := "accepting connections"
+	return &evidence.Record{
+		Schema:  evidence.SchemaID,
+		TS:      ts,
+		Drill:   evidence.Drill{Name: "cli-test", ConfigHash: "sha256:" + strings.Repeat("ab", 32)},
+		Backup:  evidence.Backup{Kind: "pgdump"},
+		Adapter: evidence.Adapter{Name: "postgres", Protocol: "probavi-adapter/0"},
+		Sandbox: evidence.Sandbox{Provider: "docker", Params: map[string]string{}},
+		Checks:  []evidence.Check{{Name: "service_healthy", OK: true, Detail: &detail}},
+		Outcome: evidence.OutcomePass,
+		Env:     evidence.Env{ProbaviVersion: "test", OS: "linux", Arch: "amd64", HostID: "0123456789abcdef"},
+	}
+}
+
+// setupLog generates a key pair through the CLI and writes a two-record log
+// with it, returning the log and public key paths.
+func setupLog(t *testing.T) (logPath, keyPath, pubPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	keyPath = filepath.Join(dir, "ed25519.key")
+	pubPath = keyPath + ".pub"
+	logPath = filepath.Join(dir, "evidence.jsonl")
+
+	code, stdout, stderr := runCLI(t, "evidence", "keygen", "--out", keyPath)
+	if code != 0 {
+		t.Fatalf("keygen exit %d, stderr: %s", code, stderr)
+	}
+	var kg keygenOutput
+	if err := json.Unmarshal([]byte(stdout), &kg); err != nil {
+		t.Fatalf("keygen output is not JSON: %v (%q)", err, stdout)
+	}
+
+	signer, err := evidence.LoadSigner(keyPath)
+	if err != nil {
+		t.Fatalf("LoadSigner on generated key: %v", err)
+	}
+	if signer.KeyID() != kg.KeyID {
+		t.Fatalf("keygen reported key_id %q, key derives %q", kg.KeyID, signer.KeyID())
+	}
+	st, err := evidence.Open(logPath, signer, nil)
+	if err != nil {
+		t.Fatalf("Open store: %v", err)
+	}
+	for _, ts := range []string{"2026-07-31T10:00:00.000Z", "2026-07-31T10:05:00.000Z"} {
+		if err := st.Append(testRecord(ts)); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return logPath, keyPath, pubPath
+}
+
+func TestKeygenThenVerifyRoundTrip(t *testing.T) {
+	logPath, keyPath, pubPath := setupLog(t)
+
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatalf("stat key: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("private key mode = %04o, want 0600", perm)
+	}
+
+	code, stdout, stderr := runCLI(t, "evidence", "verify", "--log", logPath, "--key", pubPath)
+	if code != exitValid {
+		t.Fatalf("verify exit %d, want 0; stderr: %s", code, stderr)
+	}
+	var res verifyOutput
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatalf("verify output is not JSON: %v (%q)", err, stdout)
+	}
+	if res.Status != "VALID" || res.Records != 2 || len(res.DamagedLines) != 0 {
+		t.Errorf("verify output = %+v, want VALID with 2 records", res)
+	}
+}
+
+func TestKeygenRefusesOverwrite(t *testing.T) {
+	_, keyPath, _ := setupLog(t)
+	code, _, stderr := runCLI(t, "evidence", "keygen", "--out", keyPath)
+	if code != exitUsage {
+		t.Fatalf("keygen over existing key: exit %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(stderr, keyPath) {
+		t.Errorf("stderr should name the offending file, got: %s", stderr)
+	}
+}
+
+func TestVerifyDamagedLog(t *testing.T) {
+	logPath, _, pubPath := setupLog(t)
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	if _, err := f.WriteString(`{"torn":`); err != nil {
+		t.Fatalf("append fragment: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	code, stdout, _ := runCLI(t, "evidence", "verify", "--log", logPath, "--key", pubPath)
+	if code != exitValidWithDamage {
+		t.Fatalf("verify exit %d, want %d (stdout: %s)", code, exitValidWithDamage, stdout)
+	}
+}
+
+func TestVerifyTamperedLog(t *testing.T) {
+	logPath, _, pubPath := setupLog(t)
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	tampered := strings.Replace(string(raw), "cli-test", "cli-tesx", 1)
+	if err := os.WriteFile(logPath, []byte(tampered), 0o600); err != nil {
+		t.Fatalf("write tampered log: %v", err)
+	}
+
+	code, stdout, _ := runCLI(t, "evidence", "verify", "--log", logPath, "--key", pubPath)
+	if code != exitInvalid {
+		t.Fatalf("verify exit %d, want %d (stdout: %s)", code, exitInvalid, stdout)
+	}
+	var res verifyOutput
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatalf("verify output is not JSON: %v", err)
+	}
+	if res.Status != "INVALID" || res.FailedLine != 1 || res.Reason == "" {
+		t.Errorf("verify output = %+v, want INVALID at line 1 with a reason", res)
+	}
+}
+
+func TestUsageErrors(t *testing.T) {
+	logPath, _, pubPath := setupLog(t)
+	missing := filepath.Join(t.TempDir(), "nope")
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no args", nil},
+		{"unknown command", []string{"restore"}},
+		{"evidence without subcommand", []string{"evidence"}},
+		{"evidence unknown subcommand", []string{"evidence", "sign"}},
+		{"verify without flags", []string{"evidence", "verify"}},
+		{"verify without key", []string{"evidence", "verify", "--log", logPath}},
+		{"verify missing log file", []string{"evidence", "verify", "--log", missing, "--key", pubPath}},
+		{"verify unreadable key", []string{"evidence", "verify", "--log", logPath, "--key", missing}},
+		{"verify bad flag", []string{"evidence", "verify", "--no-such-flag"}},
+		{"keygen without out", []string{"evidence", "keygen"}},
+		{"keygen bad flag", []string{"evidence", "keygen", "--no-such-flag"}},
+		{"keygen uncreatable path", []string{"evidence", "keygen", "--out", filepath.Join(missing, "sub", "k")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, _, stderr := runCLI(t, tt.args...)
+			if code != exitUsage {
+				t.Errorf("exit %d, want %d (stderr: %s)", code, exitUsage, stderr)
+			}
+		})
+	}
+}
