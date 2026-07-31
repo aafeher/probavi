@@ -88,7 +88,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          # The scanner runs on the latest stable toolchain, not the module
+          # minimum from go.mod: govulncheck@latest tracks current Go and
+          # refuses to build on older ones. It analyzes source, so the
+          # toolchain choice affects no build output.
+          go-version: stable
+          check-latest: true
       - name: govulncheck
         # Deliberately @latest: a vulnerability scanner is only useful when
         # current, and the tool version does not affect build outputs.
