@@ -313,12 +313,15 @@ func TestDestroyIdempotent(t *testing.T) {
 func TestSweepOrphans(t *testing.T) {
 	livePID := strconv.Itoa(os.Getpid())
 	p, fake := testProvider(t,
-		response{stdout: "dead1\nlive2\nbroken3\n"}, // docker ps
-		response{stdout: "999999999\n"},             // inspect dead1: pid long gone
-		response{exit: 0},                           // rm dead1
-		response{stdout: livePID + "\n"},            // inspect live2: this process
-		response{stdout: "\n"},                      // inspect broken3: missing label
-		response{exit: 0},                           // rm broken3
+		response{stdout: "dead1\nlive2\nbroken3\ngone4\n"}, // docker ps
+		response{stdout: "999999999\n"},                    // inspect dead1: pid long gone
+		response{exit: 0},                                  // rm dead1
+		response{stdout: livePID + "\n"},                   // inspect live2: this process
+		response{stdout: "\n"},                             // inspect broken3: missing label
+		response{exit: 0},                                  // rm broken3
+		// gone4 was torn down by a concurrent drill between ps and inspect
+		// — the sweep must skip it, not fail.
+		response{exit: 1, stderr: "Error: No such object: gone4"},
 	)
 	removed, err := p.SweepOrphans(context.Background())
 	if err != nil {
