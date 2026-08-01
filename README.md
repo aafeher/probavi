@@ -141,6 +141,16 @@ The sandbox is where the restored copy of your production data briefly lives, so
 
   The pod mounts no service-account token, declares no ports, and the Job carries `activeDeadlineSeconds` + `ttlSecondsAfterFinished`, so the cluster kills and garbage-collects the sandbox even if the drill host dies and never comes back. One residual difference to understand: Kubernetes pods always join the cluster network — pod-level isolation equivalent to Docker's `--network none` can only come from your cluster's NetworkPolicy. Every sandbox pod carries the label `com.probavi.sandbox=1`; give it a deny-all ingress/egress policy.
 
+### Remote Docker over SSH
+
+The docker provider works unchanged against a daemon on another machine — point it there with the docker CLI's native SSH transport:
+
+```
+DOCKER_HOST=ssh://drill@drill-box.internal  probavi run --config /etc/probavi/orders.yaml
+```
+
+Drills then run on the remote machine's resources while backups and evidence stay on the host that invokes `probavi`: `put_file` streams the backup bytes through the SSH connection (never a published port), and every container guarantee above — engine image version matching, `--network none`, resource caps, forced destruction — holds exactly as locally. Requirements: key-based SSH to the target and a docker daemon + CLI there. Several drill hosts may safely share one daemon: sandboxes carry a host-scoped label and each host's orphan sweep only ever touches its own containers (upgrade all sharing hosts to ≥ the version that introduced the label before pointing them at a common daemon). The SSH endpoint deliberately lives in the environment, not in the drill config — sandbox params are recorded verbatim in signed evidence records, and connection details never belong there. Residual risk to weigh: the remote daemon is effectively root on its machine, and the restored production data briefly lives on that machine's disks — give drills a machine you trust as much as the backup storage itself.
+
 ## Running on a schedule
 
 Probavi deliberately has no built-in scheduler — cron or a systemd timer owns the cadence, Probavi owns the proof:

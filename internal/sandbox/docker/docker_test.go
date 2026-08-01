@@ -52,6 +52,8 @@ func (f *fakeRunner) Run(_ context.Context, stdin io.Reader, name string, args .
 	return []byte(r.stdout), []byte(r.stderr), r.truncated, r.exit, r.err
 }
 
+const testHostID = "abcd1234abcd1234"
+
 func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) {
 	t.Helper()
 	fake := &fakeRunner{t: t, responses: responses}
@@ -60,6 +62,7 @@ func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) 
 		run:           fake,
 		logger:        slog.New(slog.DiscardHandler),
 		pid:           os.Getpid(),
+		hostID:        testHostID,
 		awaitInterval: time.Millisecond,
 		awaitCap:      50 * time.Millisecond,
 	}, fake
@@ -72,6 +75,9 @@ func TestNewDefaults(t *testing.T) {
 	}
 	if p.awaitInterval != awaitInterval || p.awaitCap != maxAwaitUptime || p.pid != os.Getpid() {
 		t.Errorf("New: interval=%v cap=%v pid=%d, want package defaults", p.awaitInterval, p.awaitCap, p.pid)
+	}
+	if len(p.hostID) != 16 {
+		t.Errorf("hostID = %q, want 16 hex chars", p.hostID)
 	}
 	if custom := New(slog.New(slog.DiscardHandler)); custom.logger == nil {
 		t.Error("New must keep a caller-provided logger")
@@ -89,6 +95,7 @@ func TestRunArgsDefaults(t *testing.T) {
 		"--network none",
 		"--label " + LabelSandbox + "=1",
 		"--label " + labelPID + "=" + strconv.Itoa(os.Getpid()),
+		"--label " + labelHost + "=" + testHostID,
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args %q missing %q", joined, want)
@@ -313,26 +320,34 @@ func TestDestroyIdempotent(t *testing.T) {
 func TestSweepOrphans(t *testing.T) {
 	livePID := strconv.Itoa(os.Getpid())
 	p, fake := testProvider(t,
-		response{stdout: "dead1\nlive2\nbroken3\ngone4\n"}, // docker ps
-		response{stdout: "999999999\n"},                    // inspect dead1: pid long gone
-		response{exit: 0},                                  // rm dead1
-		response{stdout: livePID + "\n"},                   // inspect live2: this process
-		response{stdout: "\n"},                             // inspect broken3: missing label
-		response{exit: 0},                                  // rm broken3
+		response{stdout: "dead1\nlive2\nbroken3\ngone4\nforeign5\nlegacy6\n"}, // docker ps
+		response{stdout: testHostID + "|999999999\n"},                         // inspect dead1: mine, pid long gone
+		response{exit: 0}, // rm dead1
+		response{stdout: testHostID + "|" + livePID + "\n"}, // inspect live2: mine, this process
+		response{stdout: "|\n"},                             // inspect broken3: labels lost
+		response{exit: 0},                                   // rm broken3
 		// gone4 was torn down by a concurrent drill between ps and inspect
 		// — the sweep must skip it, not fail.
 		response{exit: 1, stderr: "Error: No such object: gone4"},
+		// foreign5 belongs to another drill host sharing this daemon
+		// (DOCKER_HOST=ssh://…); its pid means nothing here — never sweep,
+		// even though that pid is dead locally.
+		response{stdout: "ffff0000ffff0000|999999999\n"},
+		// legacy6 predates the host label: host-local by definition, so
+		// the dead pid makes it an orphan.
+		response{stdout: "|999999998\n"},
+		response{exit: 0}, // rm legacy6
 	)
 	removed, err := p.SweepOrphans(context.Background())
 	if err != nil {
 		t.Fatalf("SweepOrphans: %v", err)
 	}
-	if !slices.Equal(removed, []string{"dead1", "broken3"}) {
-		t.Errorf("removed = %v, want [dead1 broken3] — live-owner sandboxes must survive", removed)
+	if !slices.Equal(removed, []string{"dead1", "broken3", "legacy6"}) {
+		t.Errorf("removed = %v, want [dead1 broken3 legacy6] — live-owner and foreign-host sandboxes must survive", removed)
 	}
 	for _, call := range fake.calls {
-		if slices.Contains(call, "rm") && slices.Contains(call, "live2") {
-			t.Errorf("sweep removed a live drill's sandbox: %v", call)
+		if slices.Contains(call, "rm") && (slices.Contains(call, "live2") || slices.Contains(call, "foreign5")) {
+			t.Errorf("sweep removed a live or foreign sandbox: %v", call)
 		}
 	}
 
@@ -364,7 +379,7 @@ func TestSweepOrphansErrorPaths(t *testing.T) {
 	t.Run("removal failure", func(t *testing.T) {
 		p, _ := testProvider(t,
 			response{stdout: "id1\n"},
-			response{stdout: "999999999\n"},
+			response{stdout: testHostID + "|999999999\n"},
 			response{exit: 1, stderr: "permission denied"},
 		)
 		if _, err := p.SweepOrphans(context.Background()); err == nil || !strings.Contains(err.Error(), "sweep orphan") {

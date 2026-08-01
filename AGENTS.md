@@ -44,7 +44,7 @@ metrics / reports / audit export
 ### 2.2 The sandbox abstraction
 
 - A sandbox provider answers one request: "give me a disposable runtime with X resources; destroy it afterwards, guaranteed."
-- Providers: Docker (`internal/sandbox/docker`) and Kubernetes Job (`internal/sandbox/k8s`), both driving the respective CLI — never an SDK. Later: remote host via SSH. Same rule as adapters: no provider-specific logic in the core.
+- Providers: Docker (`internal/sandbox/docker`) and Kubernetes Job (`internal/sandbox/k8s`), both driving the respective CLI — never an SDK. The docker provider also serves the remote-host deployment via the CLI's native SSH transport (`DOCKER_HOST=ssh://…`; endpoint in the environment only — sandbox params enter evidence records, connection details must not). A bare-host SSH provider (no container runtime on the target) remains a future spec-first task. Same rule as adapters: no provider-specific logic in the core.
 - Cleanup is sacred: label every created resource, sweep orphans on startup, always tear down on failure paths (defer + context timeout).
 
 ### 2.3 The evidence store

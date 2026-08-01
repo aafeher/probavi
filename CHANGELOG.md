@@ -11,6 +11,21 @@ always called out explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- Remote Docker over SSH: the docker sandbox provider is documented and
+  CI-proven against remote daemons selected with `DOCKER_HOST=ssh://…` —
+  drills run on the remote machine while backups stream through the SSH
+  connection, never a published port. The endpoint lives in the
+  environment only; connection details never enter evidence records.
+
+### Fixed
+
+- The docker orphan sweep is host-scoped now (matching the k8s provider):
+  sandboxes carry a `com.probavi.host` label, and when several drill
+  hosts share one daemon, a host can no longer mistake another host's
+  live drill for a dead orphan and sweep it mid-run.
+
 ## [0.1.0] - 2026-08-01
 
 First tagged release. Everything below is new.
