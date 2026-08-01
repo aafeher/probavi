@@ -13,6 +13,18 @@ always called out explicitly.
 
 ### Added
 
+- SQL Server adapter (`adapters/mssql`, `probavi-adapter-mssql`):
+  restores native `BACKUP DATABASE` artifacts (`bak`, `bak_dir` kinds)
+  under the drill's target name, with the file list read from the backup
+  and every logical file `MOVE`d to sandbox paths. The sandbox starts
+  idle and the adapter owns the engine: SQL Server cannot run without a
+  superuser password, and a password in sandbox params would enter the
+  signed evidence record — so the drill engine uses a documented public
+  constant confined to the zero-ingress sandbox, the mssql analog of the
+  postgres trust overwrite and the mysql empty root password. sqlcmd's
+  dialect quirks are absorbed declaratively (`-I` for double-quoted
+  identifiers, a `SQLCMDINI` startup script for undecorated rows), so
+  builtin checks work unchanged. Conformance 15/15.
 - MongoDB adapter (`adapters/mongodb`, `probavi-adapter-mongodb`):
   restores `mongodump --archive` backups — plain or `--gzip`, the
   compression sniffed from the artifact bytes — with
@@ -41,6 +53,14 @@ always called out explicitly.
 
 ### Fixed
 
+- The docker provider's `put_file` lands files owned by the identity
+  exec commands run as (root-run chown after the copy), matching the k8s
+  and remotehost providers, where the exec user creates the file by
+  construction. Previously `docker cp` preserved the host file's numeric
+  uid, so on images with a non-root default user (SQL Server runs as
+  `mssql`) the copied backup was unreadable by the engine and the mode
+  step failed outright. `put_file` on the docker provider now requires
+  `sh` in the image, like the other providers always did.
 - The docker orphan sweep is host-scoped now (matching the k8s provider):
   sandboxes carry a `com.probavi.host` label, and when several drill
   hosts share one daemon, a host can no longer mistake another host's

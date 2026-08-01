@@ -5,9 +5,10 @@ language. The protocol specification (`adapter-protocol.md`) is normative;
 this document is the practical companion, and `schemas/adapter/` holds
 machine-readable JSON Schemas (draft 2020-12) for every message and payload
 shape — wire them into your test suite from day one. The in-repo adapters
-(`adapters/postgres`, `adapters/mysql`, `adapters/mongodb`) were written
-from the spec alone — standard library only, zero imports from the Probavi
-core — as proof that the documents suffice.
+(`adapters/postgres`, `adapters/mysql`, `adapters/mongodb`,
+`adapters/mssql`) were written from the spec alone — standard library
+only, zero imports from the Probavi core — as proof that the documents
+suffice.
 
 ## What an adapter is
 

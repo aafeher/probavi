@@ -279,7 +279,15 @@ func TestPutFile(t *testing.T) {
 		}
 	})
 
-	t.Run("failures", func(t *testing.T) {
+}
+
+func TestPutFileFailures(t *testing.T) {
+	hostFile := filepath.Join(t.TempDir(), "backup.dump")
+	if err := os.WriteFile(hostFile, []byte("0123456789"), 0o600); err != nil {
+		t.Fatalf("write host file: %v", err)
+	}
+
+	t.Run("invalid inputs fail before any docker call", func(t *testing.T) {
 		p, _ := testProvider(t)
 		sbx := &Sandbox{id: "abc123", p: p}
 		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", "rw-"); !errors.Is(err, sandbox.ErrInvalidParams) {
@@ -288,33 +296,27 @@ func TestPutFile(t *testing.T) {
 		if _, err := sbx.PutFile(context.Background(), filepath.Join(t.TempDir(), "gone"), "/tmp/b", ""); err == nil {
 			t.Error("missing host file must fail before any docker call")
 		}
+	})
 
-		p, _ = testProvider(t, response{exit: 1, stderr: "cp failed"})
-		sbx = &Sandbox{id: "abc123", p: p}
-		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), "cp failed") {
-			t.Errorf("cp failure: got %v", err)
-		}
-
-		p, _ = testProvider(t, response{}, response{exit: 1, stderr: "sh: not found"})
-		sbx = &Sandbox{id: "abc123", p: p}
-		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), "exec identity") {
-			t.Errorf("identity failure: got %v", err)
-		}
-
+	for name, tt := range map[string]struct {
+		responses []response
+		wantSub   string
+	}{
+		"cp fails":       {[]response{{exit: 1, stderr: "cp failed"}}, "cp failed"},
+		"identity fails": {[]response{{}, {exit: 1, stderr: "sh: not found"}}, "exec identity"},
 		// A root-run chown must never receive anything but uid:gid — junk
 		// id output is refused, not passed through.
-		p, _ = testProvider(t, response{}, response{stdout: "uid=0(root) gid=0\n"})
-		sbx = &Sandbox{id: "abc123", p: p}
-		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), "unexpected id output") {
-			t.Errorf("junk identity: got %v", err)
-		}
-
-		p, _ = testProvider(t, response{}, response{stdout: "0:0\n"}, response{exit: 1, stderr: "chown: not permitted"})
-		sbx = &Sandbox{id: "abc123", p: p}
-		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), "ownership and mode") {
-			t.Errorf("chown failure: got %v", err)
-		}
-	})
+		"junk identity": {[]response{{}, {stdout: "uid=0(root) gid=0\n"}}, "unexpected id output"},
+		"chown fails":   {[]response{{}, {stdout: "0:0\n"}, {exit: 1, stderr: "chown: not permitted"}}, "ownership and mode"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, _ := testProvider(t, tt.responses...)
+			sbx := &Sandbox{id: "abc123", p: p}
+			if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("PutFile: got %v, want mention of %q", err, tt.wantSub)
+			}
+		})
+	}
 }
 
 func TestDestroyIdempotent(t *testing.T) {
