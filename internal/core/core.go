@@ -105,15 +105,23 @@ func (d *Drill) defaults() {
 
 // baseRecord pre-fills everything knowable before the drill starts, so any
 // abort still produces a complete, valid record with nulls for the unknown.
+// A PITR drill's recovery target is resolved to an absolute instant here,
+// once: the same value goes into the record and to the adapter, and it is
+// recorded even when the drill aborts before provisioning.
 func (d *Drill) baseRecord() *evidence.Record {
 	cfg := d.Config
 	params := cfg.Sandbox.Params
 	if params == nil {
 		params = map[string]string{}
 	}
+	var pitrTarget *string
+	if cfg.Target.PITR != nil {
+		resolved := cfg.Target.PITR.Resolve(d.Now()).UTC().Format(evidence.TimestampFormat)
+		pitrTarget = &resolved
+	}
 	return &evidence.Record{
 		Schema:  evidence.SchemaID,
-		Drill:   evidence.Drill{Name: cfg.Target.Name, ConfigHash: cfg.Hash},
+		Drill:   evidence.Drill{Name: cfg.Target.Name, ConfigHash: cfg.Hash, PITRTarget: pitrTarget},
 		Backup:  evidence.Backup{Kind: cfg.Target.Source.Kind},
 		Adapter: evidence.Adapter{Name: cfg.Target.Adapter, Protocol: adapter.ProtocolVersion},
 		Sandbox: evidence.Sandbox{Provider: cfg.Sandbox.Provider, Params: params},
@@ -149,6 +157,14 @@ func (d *Drill) execute(ctx context.Context, rec *evidence.Record) {
 			Message: fmt.Sprintf("adapter %s does not support source kind %s", probe.Name, d.Config.Target.Source.Kind)}
 		return
 	}
+	// The protocol (§6.2) forbids sending pitr to a source kind that did not
+	// declare the capability; gate here so the config error is precise.
+	if d.Config.Target.PITR != nil && !supportsPITR(probe, d.Config.Target.Source.Kind) {
+		rec.Outcome = evidence.OutcomeError
+		rec.Error = &evidence.DrillError{Code: "unsupported_source",
+			Message: fmt.Sprintf("source kind %s does not support point-in-time recovery (adapter %s)", d.Config.Target.Source.Kind, probe.Name)}
+		return
+	}
 
 	provisionStart := d.Now()
 	sbx, err := d.Provider.Create(ctx, d.Config.Sandbox.Params)
@@ -162,7 +178,7 @@ func (d *Drill) execute(ctx context.Context, rec *evidence.Record) {
 	rec.Timings.Provision = msSince(provisionStart, d.Now())
 	defer d.destroySandbox(sbx)
 
-	provRes, perr := d.Adapter.Provision(ctx, d.provisionRequest(sbx), sbx)
+	provRes, perr := d.Adapter.Provision(ctx, d.provisionRequest(sbx, rec.Drill.PITRTarget), sbx)
 	defer d.teardown(rec, provRes, sbx)
 	if perr != nil {
 		d.classify(ctx, rec, perr)
@@ -187,9 +203,9 @@ func (d *Drill) execute(ctx context.Context, rec *evidence.Record) {
 	rec.Outcome = evidence.OutcomePass
 }
 
-func (d *Drill) provisionRequest(sbx Sandbox) *adapter.ProvisionRequest {
+func (d *Drill) provisionRequest(sbx Sandbox, pitrTarget *string) *adapter.ProvisionRequest {
 	src := d.Config.Target.Source
-	return &adapter.ProvisionRequest{
+	req := &adapter.ProvisionRequest{
 		Source: adapter.ProvisionSource{
 			Kind:          src.Kind,
 			Path:          src.Path,
@@ -199,6 +215,10 @@ func (d *Drill) provisionRequest(sbx Sandbox) *adapter.ProvisionRequest {
 		Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
 		Options: d.Config.Target.Options,
 	}
+	if pitrTarget != nil {
+		req.PITR = &adapter.PITR{TargetTime: *pitrTarget}
+	}
+	return req
 }
 
 func (d *Drill) checkDeps(probe *adapter.ProbeResult, provRes *adapter.ProvisionResult, sbx Sandbox) checks.Deps {
@@ -337,6 +357,15 @@ func supportsKind(probe *adapter.ProbeResult, kind string) bool {
 	for _, s := range probe.Sources {
 		if s.Kind == kind {
 			return true
+		}
+	}
+	return false
+}
+
+func supportsPITR(probe *adapter.ProbeResult, kind string) bool {
+	for _, s := range probe.Sources {
+		if s.Kind == kind {
+			return s.Capabilities.PITR
 		}
 	}
 	return false

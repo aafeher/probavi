@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	"github.com/goccy/go-yaml"
 )
@@ -45,6 +46,22 @@ type Target struct {
 	Adapter string            `yaml:"adapter"`
 	Source  Source            `yaml:"source"`
 	Options map[string]string `yaml:"options"`
+	PITR    *PITR             `yaml:"pitr"`
+}
+
+// PITR requests point-in-time recovery. Exactly one of TargetTime (an
+// absolute RFC 3339 instant) or TargetAge (a relative age the core resolves
+// to now−age at drill start, so scheduled drills never go stale) must be
+// set. Time is the only engine-neutral recovery target the core schema
+// knows (AGENTS.md §6, decided 2026-08-01); engine-specific coordinates
+// belong in source.params.
+type PITR struct {
+	TargetTime string   `yaml:"target_time"`
+	TargetAge  Duration `yaml:"target_age"`
+
+	// parsedTime caches the validated TargetTime so Resolve needs no
+	// second, error-swallowing parse.
+	parsedTime time.Time
 }
 
 // Source describes the backup source; Kind is adapter-defined and Params
@@ -153,6 +170,35 @@ func (t *Target) validate(p *problems) {
 			p.add("target.source.credential_env entry %q is not a valid environment variable name", name)
 		}
 	}
+	if t.PITR != nil {
+		t.PITR.validate(p)
+	}
+}
+
+func (pt *PITR) validate(p *problems) {
+	hasTime := pt.TargetTime != ""
+	hasAge := pt.TargetAge != 0
+	if hasTime == hasAge {
+		p.add(`target.pitr requires exactly one of target_time (RFC 3339, e.g. "2026-07-30T14:32:00Z") or target_age (e.g. "24h")`)
+		return
+	}
+	if hasTime {
+		ts, err := time.Parse(time.RFC3339, pt.TargetTime)
+		if err != nil {
+			p.add("target.pitr.target_time %q is not an RFC 3339 timestamp", pt.TargetTime)
+			return
+		}
+		pt.parsedTime = ts
+	}
+}
+
+// Resolve returns the absolute recovery target: the validated target_time,
+// or now minus target_age. Only meaningful on a Config returned by Load.
+func (pt *PITR) Resolve(now time.Time) time.Time {
+	if !pt.parsedTime.IsZero() {
+		return pt.parsedTime
+	}
+	return now.Add(-pt.TargetAge.Std())
 }
 
 func (s *Sandbox) validate(p *problems) {

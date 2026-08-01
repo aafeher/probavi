@@ -126,6 +126,10 @@ func TestLoadRejects(t *testing.T) {
 		{"missing evidence path", strings.Replace(validYAML, "path: /var/lib/probavi/evidence.jsonl", "path: \"\"", 1), []string{"evidence.path is required"}},
 		{"missing sign key", strings.Replace(validYAML, "sign_key: /etc/probavi/ed25519.key", "sign_key: \"\"", 1), []string{"evidence.sign_key is required", "keygen"}},
 		{"empty metrics section", validYAML + "metrics:\n  prometheus_textfile: \"\"\n", []string{"metrics.prometheus_textfile is required"}},
+		{"pitr with both targets", strings.Replace(validYAML, "adapter: postgres", "adapter: postgres\n  pitr:\n    target_time: \"2026-07-30T14:32:00Z\"\n    target_age: 24h", 1), []string{"exactly one of target_time"}},
+		{"pitr with neither target", strings.Replace(validYAML, "adapter: postgres", "adapter: postgres\n  pitr: {}", 1), []string{"exactly one of target_time"}},
+		{"pitr bad target_time", strings.Replace(validYAML, "adapter: postgres", "adapter: postgres\n  pitr:\n    target_time: \"yesterday 14:32\"", 1), []string{"not an RFC 3339 timestamp"}},
+		{"pitr negative target_age", strings.Replace(validYAML, "adapter: postgres", "adapter: postgres\n  pitr:\n    target_age: -24h", 1), []string{"must be positive"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -139,6 +143,31 @@ func TestLoadRejects(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPITRResolve(t *testing.T) {
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+
+	abs := strings.Replace(validYAML, "adapter: postgres",
+		"adapter: postgres\n  pitr:\n    target_time: \"2026-07-30T14:32:00+02:00\"", 1)
+	cfg, err := Load(writeConfig(t, abs))
+	if err != nil {
+		t.Fatalf("Load absolute pitr: %v", err)
+	}
+	got := cfg.Target.PITR.Resolve(now).UTC()
+	if want := time.Date(2026, 7, 30, 12, 32, 0, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("Resolve(target_time) = %v, want %v (offset normalized to UTC)", got, want)
+	}
+
+	rel := strings.Replace(validYAML, "adapter: postgres",
+		"adapter: postgres\n  pitr:\n    target_age: 24h", 1)
+	cfg, err = Load(writeConfig(t, rel))
+	if err != nil {
+		t.Fatalf("Load relative pitr: %v", err)
+	}
+	if got := cfg.Target.PITR.Resolve(now); !got.Equal(now.Add(-24 * time.Hour)) {
+		t.Errorf("Resolve(target_age) = %v, want now−24h", got)
 	}
 }
 
