@@ -20,7 +20,7 @@ The output is not a green checkmark. It is an auditable, cryptographically verif
 
 ## Status
 
-**Pre-alpha, working end to end for PostgreSQL and MySQL.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`) and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative. Not yet released — packaging and polish remain. See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
+**Pre-alpha, working end to end for PostgreSQL and MySQL.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`) and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative; third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. Not yet released — packaging and polish remain. See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
 
 ## Shape
 
