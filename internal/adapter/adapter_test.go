@@ -367,18 +367,27 @@ func TestPutFileForbiddenOutsideProvision(t *testing.T) {
 	}
 }
 
-func TestSandboxResultWriteFailure(t *testing.T) {
-	// The adapter asks for a verb, then closes its stdin: the core cannot
-	// deliver the sandbox_result and must fail the operation cleanly.
-	script := prelude +
-		`printf '{"protocol":"probavi-adapter/0","request_id":"%s","sandbox_call":{"call_id":"c1","verb":"exec","args":{"argv":["x"]}}}\n' "$RID"` + "\n" +
-		`exec 0<&-` + "\n" + `sleep 0.3` + "\n" + `exit 0`
-	r := fakeRunner(t, script, nil, nil)
-	req := &ProvisionRequest{Source: ProvisionSource{Kind: "f", Path: "/b"}}
-	_, err := r.Provision(context.Background(), req, &fakeVerbs{})
-	aerr := asAdapterError(t, err)
-	if aerr.Code != CodeAdapterCrash || !strings.Contains(aerr.Message, "write sandbox_result") {
-		t.Errorf("error = %+v, want write sandbox_result crash", aerr)
+func TestSandboxResultWriteRaces(t *testing.T) {
+	// The adapter asks for a verb and stops listening. Whether our result
+	// write lands in the pipe buffer or hits EPIPE depends on scheduling
+	// (it flapped on loaded CI runners), so a closed pipe must never be
+	// the verdict: both orderings converge on the read loop's
+	// classification of the adapter's exit.
+	call := `printf '{"protocol":"probavi-adapter/0","request_id":"%s","sandbox_call":{"call_id":"c1","verb":"exec","args":{"argv":["x"]}}}\n' "$RID"`
+	scripts := map[string]string{
+		"stdin closes after the call":  prelude + call + "\n" + `exec 0<&-` + "\n" + `sleep 0.3` + "\n" + `exit 0`,
+		"stdin closes before the call": prelude + `exec 0<&-` + "\n" + call + "\n" + `sleep 0.3` + "\n" + `exit 0`,
+	}
+	for name, script := range scripts {
+		t.Run(name, func(t *testing.T) {
+			r := fakeRunner(t, script, nil, nil)
+			req := &ProvisionRequest{Source: ProvisionSource{Kind: "f", Path: "/b"}}
+			_, err := r.Provision(context.Background(), req, &fakeVerbs{})
+			aerr := asAdapterError(t, err)
+			if aerr.Code != CodeAdapterCrash || !strings.Contains(aerr.Message, "without a final response") {
+				t.Errorf("error = %+v, want the read loop's deterministic classification", aerr)
+			}
+		})
 	}
 }
 
