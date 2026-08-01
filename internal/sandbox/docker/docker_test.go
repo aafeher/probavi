@@ -257,8 +257,8 @@ func TestPutFile(t *testing.T) {
 		t.Fatalf("write host file: %v", err)
 	}
 
-	t.Run("copy and chmod", func(t *testing.T) {
-		p, fake := testProvider(t, response{}, response{})
+	t.Run("copy, chown to the exec identity, chmod", func(t *testing.T) {
+		p, fake := testProvider(t, response{}, response{stdout: "10001:10001\n"}, response{})
 		sbx := &Sandbox{id: "abc123", p: p}
 		res, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b.dump", "")
 		if err != nil {
@@ -270,8 +270,12 @@ func TestPutFile(t *testing.T) {
 		if got := strings.Join(fake.calls[0], " "); got != "docker cp "+hostFile+" abc123:/tmp/b.dump" {
 			t.Errorf("cp call = %q", got)
 		}
-		if got := strings.Join(fake.calls[1], " "); got != "docker exec abc123 chmod 0600 /tmp/b.dump" {
-			t.Errorf("chmod call = %q (default mode must be 0600)", got)
+		if got := strings.Join(fake.calls[1], " "); got != `docker exec abc123 sh -c echo "$(id -u):$(id -g)"` {
+			t.Errorf("identity call = %q", got)
+		}
+		want := `docker exec -u 0 abc123 sh -c chown -R -- "$1" "$2" && chmod -- "$3" "$2" sh 10001:10001 /tmp/b.dump 0600`
+		if got := strings.Join(fake.calls[2], " "); got != want {
+			t.Errorf("ownership call = %q\nwant           %q (root-run, default mode 0600)", got, want)
 		}
 	})
 
@@ -291,10 +295,24 @@ func TestPutFile(t *testing.T) {
 			t.Errorf("cp failure: got %v", err)
 		}
 
-		p, _ = testProvider(t, response{}, response{exit: 1, stderr: "chmod: not found"})
+		p, _ = testProvider(t, response{}, response{exit: 1, stderr: "sh: not found"})
 		sbx = &Sandbox{id: "abc123", p: p}
-		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), "chmod") {
-			t.Errorf("chmod failure: got %v", err)
+		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), "exec identity") {
+			t.Errorf("identity failure: got %v", err)
+		}
+
+		// A root-run chown must never receive anything but uid:gid — junk
+		// id output is refused, not passed through.
+		p, _ = testProvider(t, response{}, response{stdout: "uid=0(root) gid=0\n"})
+		sbx = &Sandbox{id: "abc123", p: p}
+		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), "unexpected id output") {
+			t.Errorf("junk identity: got %v", err)
+		}
+
+		p, _ = testProvider(t, response{}, response{stdout: "0:0\n"}, response{exit: 1, stderr: "chown: not permitted"})
+		sbx = &Sandbox{id: "abc123", p: p}
+		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/b", ""); err == nil || !strings.Contains(err.Error(), "ownership and mode") {
+			t.Errorf("chown failure: got %v", err)
 		}
 	})
 }
@@ -427,11 +445,18 @@ func TestRunnerErrorPaths(t *testing.T) {
 			t.Error("cp runner error must surface")
 		}
 	})
-	t.Run("putfile chmod runner error", func(t *testing.T) {
-		p, _ := testProvider(t, response{}, response{err: errors.New("chmod spawn failed")})
+	t.Run("putfile identity runner error", func(t *testing.T) {
+		p, _ := testProvider(t, response{}, response{err: errors.New("id spawn failed")})
 		sbx := &Sandbox{id: "abc123", p: p}
 		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/f", ""); err == nil {
-			t.Error("chmod runner error must surface")
+			t.Error("identity runner error must surface")
+		}
+	})
+	t.Run("putfile chown runner error", func(t *testing.T) {
+		p, _ := testProvider(t, response{}, response{stdout: "0:0\n"}, response{err: errors.New("chown spawn failed")})
+		sbx := &Sandbox{id: "abc123", p: p}
+		if _, err := sbx.PutFile(context.Background(), hostFile, "/tmp/f", ""); err == nil {
+			t.Error("chown runner error must surface")
 		}
 	})
 	t.Run("destroy runner error", func(t *testing.T) {

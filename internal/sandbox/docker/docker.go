@@ -35,7 +35,12 @@ import (
 	"github.com/aafeher/probavi/internal/sandbox/cli"
 )
 
-var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var (
+	envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// ownerPattern pins the id output PutFile trusts before handing it to
+	// a root-run chown.
+	ownerPattern = regexp.MustCompile(`^[0-9]+:[0-9]+$`)
+)
 
 const (
 	// LabelSandbox marks every container this provider creates; the orphan
@@ -233,6 +238,14 @@ func (s *Sandbox) Exec(ctx context.Context, req sandbox.ExecRequest) (*sandbox.E
 // PutFile copies a host file into the sandbox and applies mode (octal
 // string, default "0600") — adapter protocol §4.2. Path allow-listing is
 // the core's responsibility; the provider only moves bytes.
+//
+// docker cp preserves the host file's numeric uid, which the image's exec
+// user — non-root in some database images — can neither read nor chmod.
+// The copy is therefore followed by a root-run chown to the identity exec
+// commands run as: the file lands exactly as if that user had created it,
+// matching the k8s and remotehost providers, where the exec user writes
+// the file by construction. Like those providers, this needs sh in the
+// image.
 func (s *Sandbox) PutFile(ctx context.Context, hostPath, destPath, mode string) (*sandbox.PutFileResult, error) {
 	if mode == "" {
 		mode = "0600"
@@ -251,10 +264,24 @@ func (s *Sandbox) PutFile(ctx context.Context, hostPath, destPath, mode string) 
 	} else if exit != 0 {
 		return nil, fmt.Errorf("copy into sandbox %s: docker cp exited %d: %s", s.id, exit, firstLine(stderr))
 	}
-	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin, "exec", s.id, "chmod", mode, destPath); err != nil {
-		return nil, fmt.Errorf("chmod in sandbox %s: %w", s.id, err)
+	stdout, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin,
+		"exec", s.id, "sh", "-c", `echo "$(id -u):$(id -g)"`)
+	if err != nil {
+		return nil, fmt.Errorf("resolve exec identity in sandbox %s: %w", s.id, err)
+	}
+	if exit != 0 {
+		return nil, fmt.Errorf("resolve exec identity in sandbox %s: exited %d: %s", s.id, exit, firstLine(stderr))
+	}
+	owner := strings.TrimSpace(string(stdout))
+	if !ownerPattern.MatchString(owner) {
+		return nil, fmt.Errorf("resolve exec identity in sandbox %s: unexpected id output %q", s.id, owner)
+	}
+	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin,
+		"exec", "-u", "0", s.id,
+		"sh", "-c", `chown -R -- "$1" "$2" && chmod -- "$3" "$2"`, "sh", owner, destPath, mode); err != nil {
+		return nil, fmt.Errorf("apply ownership and mode in sandbox %s: %w", s.id, err)
 	} else if exit != 0 {
-		return nil, fmt.Errorf("chmod in sandbox %s: exited %d: %s", s.id, exit, firstLine(stderr))
+		return nil, fmt.Errorf("apply ownership and mode in sandbox %s: exited %d: %s", s.id, exit, firstLine(stderr))
 	}
 	return &sandbox.PutFileResult{BytesCopied: info.Size(), Duration: time.Since(start)}, nil
 }
