@@ -5,6 +5,9 @@ provider name `remotehost`, system-level polkit privilege model,
 unix-socket-first engine addressing, systemd ≥ 244). Design-normative for
 the implementation; changing a decision here comes before changing code
 (AGENTS.md §5.1). Tracked by the ROADMAP Phase 4 item.
+**Implemented 2026-08-01** in `internal/sandbox/remotehost`; operator
+documentation (requirements, polkit rule, residual risk) lives in the
+README section "Bare-host drills over SSH".
 
 This document answers the four questions that made bare-host drills a
 spec-first task: how isolation, engine/tool version matching, ephemeral
@@ -131,7 +134,7 @@ Three independent layers, mirroring the k8s provider's philosophy:
 sandbox:
   provider: remotehost
   params:
-    workspace_root: /var/lib/probavi-drills   # default TBD
+    workspace_root: /var/lib/probavi-drills   # the default
     memory: 2G                                # slice MemoryMax
     cpus: "2"                                 # slice CPUQuota (200%)
   timeout: 30m

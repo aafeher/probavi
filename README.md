@@ -125,6 +125,7 @@ Then set `path: demo.dump` in `drill.yaml`.
 The sandbox is where the restored copy of your production data briefly lives, so its defaults are deliberately locked down.
 
 - **docker** — containers with `--network none` (loopback only), no published ports, labeled and force-removed with their volumes; an orphan sweep at every drill start reaps leftovers of crashed runs.
+- **remotehost** — for dedicated targets that cannot run containers at all: transient systemd slice + per-drill workspace over plain SSH — see [Bare-host drills over SSH](#bare-host-drills-over-ssh-remotehost) below.
 - **k8s** — each drill runs as a `batch/v1` Job (`kubectl` drives it; cluster selection follows `KUBECONFIG`):
 
   ```yaml
@@ -150,6 +151,48 @@ DOCKER_HOST=ssh://drill@drill-box.internal  probavi run --config /etc/probavi/or
 ```
 
 Drills then run on the remote machine's resources while backups and evidence stay on the host that invokes `probavi`: `put_file` streams the backup bytes through the SSH connection (never a published port), and every container guarantee above — engine image version matching, `--network none`, resource caps, forced destruction — holds exactly as locally. Requirements: key-based SSH to the target and a docker daemon + CLI there. Several drill hosts may safely share one daemon: sandboxes carry a host-scoped label and each host's orphan sweep only ever touches its own containers (upgrade all sharing hosts to ≥ the version that introduced the label before pointing them at a common daemon). The SSH endpoint deliberately lives in the environment, not in the drill config — sandbox params are recorded verbatim in signed evidence records, and connection details never belong there. Residual risk to weigh: the remote daemon is effectively root on its machine, and the restored production data briefly lives on that machine's disks — give drills a machine you trust as much as the backup storage itself.
+
+### Bare-host drills over SSH (remotehost)
+
+When the target machine cannot run a container runtime at all (appliance-like DB hosts, restrictive policies, niche platforms), the **remotehost** provider runs drills there with nothing but OpenSSH and systemd: one sandbox is one transient systemd slice plus one per-drill workspace directory, and every command — including the engine the adapter starts — runs as a transient unit inside that slice, so resource caps bound the whole sandbox and stopping the slice kills the entire process tree. The design (and what deliberately does *not* survive without containers) is specified in [`docs/sandbox-bare-host.md`](docs/sandbox-bare-host.md). If the target *can* run Docker, prefer Remote Docker over SSH above — every container guarantee holds there.
+
+```yaml
+sandbox:
+  provider: remotehost
+  params:
+    workspace_root: /var/lib/probavi-drills   # default
+    memory: 2G                                # slice MemoryMax
+    cpus: "2"                                 # slice CPUQuota (200%)
+  timeout: 30m
+```
+
+```
+PROBAVI_SSH_TARGET=drill@drill-box.internal  probavi run --config /etc/probavi/orders.yaml
+```
+
+**The non-negotiable premise: the target host is dedicated to drills.** It runs no other database, serves no other tenant, and holds nothing you would mind a restored production copy briefly living next to.
+
+Target requirements — the provider probes and refuses what it can check, the rest is operator duty:
+
+- systemd ≥ 244 as PID 1 (probed at first contact; older targets are refused).
+- The engine toolchain installed **at versions matching the backups under test** — with no container image to pin versions, keeping them aligned is on you; a mismatch surfaces as an honest failed drill, never a silent wrong-version pass.
+- A dedicated OS user for drills, key-based SSH only (the provider never weakens host key verification and never prompts). Root is not required: grant the drill user transient-unit rights with this polkit rule (as root, drop it into `/etc/polkit-1/rules.d/50-probavi-drill.rules`, adjusting the user name):
+
+  ```js
+  polkit.addRule(function(action, subject) {
+      if (action.id == "org.freedesktop.systemd1.manage-units" &&
+          subject.user == "probavi-drill") {
+          return polkit.Result.YES;
+      }
+  });
+  ```
+
+  Understand what this grants: `manage-units` lets the drill user start and stop arbitrary system units — on a shared machine that is root-equivalent, which is one more reason the dedicated-host premise is not advisory. (`systemd-run --user` was rejected as the default because per-user managers cannot enforce `MemoryMax` on some cgroup setups, and resource caps that silently do not bind have no place in a trust product.)
+- Create `workspace_root` owned by the drill user (`install -d -o probavi-drill -g probavi-drill /var/lib/probavi-drills`). If several drill hosts share one target, connect them as the **same** drill user — the host-scoped orphan sweep reads owner markers inside 0700 workspaces.
+
+Cleanup is layered: `Destroy` stops the slice and removes the workspace on every drill outcome; the next drill from the same host sweeps workspaces whose owner process died; and a target-side transient timer armed at create stops the slice and removes the workspace after a hard deadline (2 h) even if the drill host never comes back. `PROBAVI_SSH_TARGET` lives in the environment for the same reason as `DOCKER_HOST` above — connection details never enter drill config or evidence records.
+
+Residual risk to document for yourself: restored engines listen on unix sockets in the workspace (loopback TCP only as engine-specific fallback), but there is no network namespace — host-level firewalling stays your job; command lines (including per-exec environment) are visible in the target's process list for their duration; and the workspace is deleted, not shredded — restored production data touches the target's persistent disks, so put the workspace on tmpfs or use full-disk encryption on the target if that matters to you.
 
 ## Running on a schedule
 

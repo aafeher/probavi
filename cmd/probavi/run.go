@@ -24,6 +24,7 @@ import (
 	"github.com/aafeher/probavi/internal/metrics"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
 	"github.com/aafeher/probavi/internal/sandbox/k8s"
+	"github.com/aafeher/probavi/internal/sandbox/remotehost"
 )
 
 // version is stamped into evidence records and printed by `probavi
@@ -115,7 +116,7 @@ func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, string, fun
 	if err != nil {
 		return nil, "", nil, err
 	}
-	provider, err := sandboxProvider(cfg.Sandbox.Provider, logger)
+	provider, err := sandboxProvider(cfg.Sandbox.Provider, cfg.Sandbox.Params, logger)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -177,21 +178,29 @@ func summarize(rec *evidence.Record, evidencePath string) runSummary {
 	return s
 }
 
-// sandboxProvider resolves the drill config's provider name.
-func sandboxProvider(name string, logger *slog.Logger) (core.Provider, error) {
+// sandboxProvider resolves the drill config's provider name. The params
+// are needed at construction time only by remotehost, whose orphan sweep
+// runs against the configured workspace root before any Create.
+func sandboxProvider(name string, params map[string]string, logger *slog.Logger) (core.Provider, error) {
 	switch name {
 	case "docker":
 		return dockerProvider{docker.New(logger)}, nil
 	case "k8s":
 		return k8sProvider{k8s.New(logger)}, nil
+	case "remotehost":
+		p, err := remotehost.New(logger, params)
+		if err != nil {
+			return nil, err
+		}
+		return remotehostProvider{p}, nil
 	default:
-		return nil, fmt.Errorf("unsupported sandbox provider %q (supported: docker, k8s)", name)
+		return nil, fmt.Errorf("unsupported sandbox provider %q (supported: docker, k8s, remotehost)", name)
 	}
 }
 
-// dockerProvider and k8sProvider adapt the concrete providers to
-// core.Provider (Go interfaces do not covariantly match the concrete
-// sandbox return types).
+// dockerProvider, k8sProvider, and remotehostProvider adapt the concrete
+// providers to core.Provider (Go interfaces do not covariantly match the
+// concrete sandbox return types).
 type dockerProvider struct {
 	p *docker.Provider
 }
@@ -222,6 +231,22 @@ func (k k8sProvider) Create(ctx context.Context, params map[string]string) (core
 
 func (k k8sProvider) SweepOrphans(ctx context.Context) ([]string, error) {
 	return k.p.SweepOrphans(ctx)
+}
+
+type remotehostProvider struct {
+	p *remotehost.Provider
+}
+
+func (r remotehostProvider) Create(ctx context.Context, params map[string]string) (core.Sandbox, error) {
+	sbx, err := r.p.Create(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return sbx, nil
+}
+
+func (r remotehostProvider) SweepOrphans(ctx context.Context) ([]string, error) {
+	return r.p.SweepOrphans(ctx)
 }
 
 // runAdapterConformance implements `probavi adapter conformance`: run the

@@ -11,6 +11,7 @@ import (
 
 	"github.com/aafeher/probavi/internal/adapter"
 	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/aafeher/probavi/internal/sandbox/remotehost"
 )
 
 // TestVersionCommand pins the version output: the binary version plus both
@@ -173,12 +174,26 @@ func TestVerifyTamperedLog(t *testing.T) {
 func TestSandboxProviderResolution(t *testing.T) {
 	logger := slog.New(slog.DiscardHandler)
 	for _, name := range []string{"docker", "k8s"} {
-		if p, err := sandboxProvider(name, logger); err != nil || p == nil {
+		if p, err := sandboxProvider(name, nil, logger); err != nil || p == nil {
 			t.Errorf("sandboxProvider(%q) = %v, %v", name, p, err)
 		}
 	}
-	if _, err := sandboxProvider("nomad", logger); err == nil || !strings.Contains(err.Error(), "supported: docker, k8s") {
+	if _, err := sandboxProvider("nomad", nil, logger); err == nil || !strings.Contains(err.Error(), "supported: docker, k8s, remotehost") {
 		t.Errorf("unknown provider: %v, want the supported list", err)
+	}
+
+	// remotehost needs its ssh target from the environment — never from
+	// config, which is recorded verbatim in evidence records.
+	t.Setenv(remotehost.EnvTarget, "")
+	if _, err := sandboxProvider("remotehost", nil, logger); err == nil || !strings.Contains(err.Error(), remotehost.EnvTarget) {
+		t.Errorf("remotehost without %s: %v, want a clear error", remotehost.EnvTarget, err)
+	}
+	t.Setenv(remotehost.EnvTarget, "drill@target.example")
+	if p, err := sandboxProvider("remotehost", map[string]string{"memory": "1G"}, logger); err != nil || p == nil {
+		t.Errorf("sandboxProvider(remotehost) = %v, %v", p, err)
+	}
+	if _, err := sandboxProvider("remotehost", map[string]string{"image": "x"}, logger); err == nil {
+		t.Error("remotehost with invalid params must fail at wiring time")
 	}
 }
 
