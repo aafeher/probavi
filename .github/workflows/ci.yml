@@ -87,11 +87,23 @@ jobs:
           kind create cluster --name probavi-it --wait 120s
           docker pull -q postgres:16
           kind load docker-image postgres:16 --name probavi-it
+      - name: set up ssh loopback (remote docker over ssh)
+        # The remote-docker test drives the daemon through the docker CLI's
+        # native SSH transport, looped back to this runner: key-based ssh to
+        # 127.0.0.1, host key pinned by ssh-keyscan — the provider cannot
+        # tell it from a genuinely remote host.
+        run: |
+          sudo systemctl start ssh
+          ssh-keygen -t ed25519 -N '' -f ~/.ssh/id_ed25519
+          cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+          chmod 600 ~/.ssh/authorized_keys
+          ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh 127.0.0.1 docker version --format '{{.Server.Version}}'
       - name: integration tests
-        # PROBAVI_IT_K8S=1: with cluster setup done above, an unreachable
-        # cluster is a hard failure — the k8s tests must never silently
-        # skip the axis this job exists to prove.
-        run: PROBAVI_IT_K8S=1 go test -race -tags integration ./...
+        # PROBAVI_IT_K8S=1 / PROBAVI_IT_SSH=1: with the setup steps above,
+        # an unreachable cluster or ssh target is a hard failure — these
+        # tests must never silently skip the axes this job exists to prove.
+        run: PROBAVI_IT_K8S=1 PROBAVI_IT_SSH=1 go test -race -tags integration ./...
 
   vulncheck:
     name: Known-vulnerability scan
