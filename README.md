@@ -20,7 +20,7 @@ The output is not a green checkmark. It is an auditable, cryptographically verif
 
 ## Status
 
-**Pre-alpha, working end to end for PostgreSQL and MySQL.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`) and physical backups (pgBackRest, Percona XtraBackup) — into a disposable Docker sandbox, validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative. Not yet released — packaging and polish remain. See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
+**Pre-alpha, working end to end for PostgreSQL and MySQL.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`) and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative. Not yet released — packaging and polish remain. See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
 
 ## Shape
 
@@ -119,6 +119,27 @@ $ docker cp probavi-demo:/tmp/demo.dump demo.dump && docker rm -f probavi-demo
 
 Then set `path: demo.dump` in `drill.yaml`.
 </details>
+
+## Sandbox providers
+
+The sandbox is where the restored copy of your production data briefly lives, so its defaults are deliberately locked down.
+
+- **docker** — containers with `--network none` (loopback only), no published ports, labeled and force-removed with their volumes; an orphan sweep at every drill start reaps leftovers of crashed runs.
+- **k8s** — each drill runs as a `batch/v1` Job (`kubectl` drives it; cluster selection follows `KUBECONFIG`):
+
+  ```yaml
+  sandbox:
+    provider: k8s
+    params:
+      image: postgres:16
+      namespace: probavi-drills   # default: "default"
+      memory: 2Gi                 # requests == limits
+      cpus: "2"
+      env.POSTGRES_HOST_AUTH_METHOD: trust
+    timeout: 30m
+  ```
+
+  The pod mounts no service-account token, declares no ports, and the Job carries `activeDeadlineSeconds` + `ttlSecondsAfterFinished`, so the cluster kills and garbage-collects the sandbox even if the drill host dies and never comes back. One residual difference to understand: Kubernetes pods always join the cluster network — pod-level isolation equivalent to Docker's `--network none` can only come from your cluster's NetworkPolicy. Every sandbox pod carries the label `com.probavi.sandbox=1`; give it a deny-all ingress/egress policy.
 
 ## Running on a schedule
 

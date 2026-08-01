@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,6 +149,18 @@ func TestVerifyTamperedLog(t *testing.T) {
 	}
 	if res.Status != "INVALID" || res.FailedLine != 1 || res.Reason == "" {
 		t.Errorf("verify output = %+v, want INVALID at line 1 with a reason", res)
+	}
+}
+
+func TestSandboxProviderResolution(t *testing.T) {
+	logger := slog.New(slog.DiscardHandler)
+	for _, name := range []string{"docker", "k8s"} {
+		if p, err := sandboxProvider(name, logger); err != nil || p == nil {
+			t.Errorf("sandboxProvider(%q) = %v, %v", name, p, err)
+		}
+	}
+	if _, err := sandboxProvider("nomad", logger); err == nil || !strings.Contains(err.Error(), "supported: docker, k8s") {
+		t.Errorf("unknown provider: %v, want the supported list", err)
 	}
 }
 

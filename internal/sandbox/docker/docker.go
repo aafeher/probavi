@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/aafeher/probavi/internal/sandbox/cli"
 )
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -43,7 +44,7 @@ const (
 // Provider creates and destroys Docker-backed sandboxes.
 type Provider struct {
 	bin    string
-	run    runner
+	run    cli.Runner
 	logger *slog.Logger
 	pid    int
 
@@ -58,7 +59,7 @@ func New(logger *slog.Logger) *Provider {
 	}
 	return &Provider{
 		bin:           "docker",
-		run:           execRunner{},
+		run:           cli.ExecRunner{},
 		logger:        logger,
 		pid:           os.Getpid(),
 		awaitInterval: awaitInterval,
@@ -81,7 +82,7 @@ func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandb
 	if err != nil {
 		return nil, err
 	}
-	stdout, stderr, _, exit, err := p.run.run(ctx, nil, p.bin, args...)
+	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("create sandbox: %w", err)
 	}
@@ -107,7 +108,7 @@ func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandb
 // runs. Containers of live processes (concurrent drills) are kept. Returns
 // the removed container ids.
 func (p *Provider) SweepOrphans(ctx context.Context) ([]string, error) {
-	stdout, stderr, _, exit, err := p.run.run(ctx, nil, p.bin, "ps", "-aq", "--filter", "label="+LabelSandbox+"=1")
+	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin, "ps", "-aq", "--filter", "label="+LabelSandbox+"=1")
 	if err != nil {
 		return nil, fmt.Errorf("list sandbox containers: %w", err)
 	}
@@ -137,7 +138,7 @@ func (p *Provider) SweepOrphans(ctx context.Context) ([]string, error) {
 // or malformed pid label counts as orphaned: the container carries our
 // label but lost its ownership metadata.
 func (p *Provider) isOrphan(ctx context.Context, id string) (bool, error) {
-	stdout, stderr, _, exit, err := p.run.run(ctx, nil, p.bin,
+	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin,
 		"inspect", "-f", `{{ index .Config.Labels "`+labelPID+`" }}`, id)
 	if err != nil {
 		return false, fmt.Errorf("inspect %s: %w", id, err)
@@ -185,7 +186,7 @@ func (s *Sandbox) Exec(ctx context.Context, req sandbox.ExecRequest) (*sandbox.E
 	args = append(args, req.Argv...)
 
 	start := time.Now()
-	stdout, stderr, truncated, exit, err := s.p.run.run(ctx, strings.NewReader(string(req.Stdin)), s.p.bin, args...)
+	stdout, stderr, truncated, exit, err := s.p.run.Run(ctx, strings.NewReader(string(req.Stdin)), s.p.bin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("exec in sandbox %s: %w", s.id, err)
 	}
@@ -214,12 +215,12 @@ func (s *Sandbox) PutFile(ctx context.Context, hostPath, destPath, mode string) 
 	}
 
 	start := time.Now()
-	if _, stderr, _, exit, err := s.p.run.run(ctx, nil, s.p.bin, "cp", hostPath, s.id+":"+destPath); err != nil {
+	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin, "cp", hostPath, s.id+":"+destPath); err != nil {
 		return nil, fmt.Errorf("copy into sandbox %s: %w", s.id, err)
 	} else if exit != 0 {
 		return nil, fmt.Errorf("copy into sandbox %s: docker cp exited %d: %s", s.id, exit, firstLine(stderr))
 	}
-	if _, stderr, _, exit, err := s.p.run.run(ctx, nil, s.p.bin, "exec", s.id, "chmod", mode, destPath); err != nil {
+	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin, "exec", s.id, "chmod", mode, destPath); err != nil {
 		return nil, fmt.Errorf("chmod in sandbox %s: %w", s.id, err)
 	} else if exit != 0 {
 		return nil, fmt.Errorf("chmod in sandbox %s: exited %d: %s", s.id, exit, firstLine(stderr))
@@ -238,7 +239,7 @@ func (s *Sandbox) Destroy(ctx context.Context) error {
 }
 
 func (p *Provider) remove(ctx context.Context, id string) error {
-	_, stderr, _, exit, err := p.run.run(ctx, nil, p.bin, "rm", "-f", "-v", id)
+	_, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin, "rm", "-f", "-v", id)
 	if err != nil {
 		return err
 	}
@@ -299,7 +300,7 @@ func (p *Provider) awaitRunning(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, p.awaitCap)
 	defer cancel()
 	for {
-		stdout, _, _, exit, err := p.run.run(ctx, nil, p.bin, "inspect", "-f", "{{.State.Running}}", id)
+		stdout, _, _, exit, err := p.run.Run(ctx, nil, p.bin, "inspect", "-f", "{{.State.Running}}", id)
 		if err != nil {
 			return fmt.Errorf("await sandbox %s: %w", id, err)
 		}

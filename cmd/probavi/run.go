@@ -19,6 +19,7 @@ import (
 	"github.com/aafeher/probavi/internal/evidence"
 	"github.com/aafeher/probavi/internal/metrics"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
+	"github.com/aafeher/probavi/internal/sandbox/k8s"
 )
 
 // version is stamped into evidence records; releases will set it via
@@ -104,8 +105,9 @@ func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, string, fun
 	if err != nil {
 		return nil, "", nil, err
 	}
-	if cfg.Sandbox.Provider != "docker" {
-		return nil, "", nil, fmt.Errorf("unsupported sandbox provider %q (supported: docker)", cfg.Sandbox.Provider)
+	provider, err := sandboxProvider(cfg.Sandbox.Provider, logger)
+	if err != nil {
+		return nil, "", nil, err
 	}
 	signer, err := evidence.LoadSigner(cfg.Evidence.SignKey)
 	if err != nil {
@@ -129,7 +131,7 @@ func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, string, fun
 	drill := &core.Drill{
 		Config:          cfg,
 		Adapter:         runner,
-		Provider:        dockerProvider{docker.New(logger)},
+		Provider:        provider,
 		Store:           store,
 		Logger:          logger,
 		Version:         version,
@@ -165,8 +167,21 @@ func summarize(rec *evidence.Record, evidencePath string) runSummary {
 	return s
 }
 
-// dockerProvider adapts *docker.Provider to core.Provider (Go interfaces
-// do not covariantly match the concrete sandbox return type).
+// sandboxProvider resolves the drill config's provider name.
+func sandboxProvider(name string, logger *slog.Logger) (core.Provider, error) {
+	switch name {
+	case "docker":
+		return dockerProvider{docker.New(logger)}, nil
+	case "k8s":
+		return k8sProvider{k8s.New(logger)}, nil
+	default:
+		return nil, fmt.Errorf("unsupported sandbox provider %q (supported: docker, k8s)", name)
+	}
+}
+
+// dockerProvider and k8sProvider adapt the concrete providers to
+// core.Provider (Go interfaces do not covariantly match the concrete
+// sandbox return types).
 type dockerProvider struct {
 	p *docker.Provider
 }
@@ -181,6 +196,22 @@ func (d dockerProvider) Create(ctx context.Context, params map[string]string) (c
 
 func (d dockerProvider) SweepOrphans(ctx context.Context) ([]string, error) {
 	return d.p.SweepOrphans(ctx)
+}
+
+type k8sProvider struct {
+	p *k8s.Provider
+}
+
+func (k k8sProvider) Create(ctx context.Context, params map[string]string) (core.Sandbox, error) {
+	sbx, err := k.p.Create(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	return sbx, nil
+}
+
+func (k k8sProvider) SweepOrphans(ctx context.Context) ([]string, error) {
+	return k.p.SweepOrphans(ctx)
 }
 
 // runAdapterProbe implements `probavi adapter probe <name>`: resolve the

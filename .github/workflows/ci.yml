@@ -77,8 +77,21 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      - name: set up kind cluster (k8s sandbox provider)
+        # kind is installed like every other Go tool — pinned version,
+        # verified by the module checksum database. kubectl ships with the
+        # runner image. postgres:16 is preloaded into the node so the k8s
+        # tests never pull through the cluster.
+        run: |
+          go install sigs.k8s.io/kind@v0.32.0
+          kind create cluster --name probavi-it --wait 120s
+          docker pull -q postgres:16
+          kind load docker-image postgres:16 --name probavi-it
       - name: integration tests
-        run: go test -race -tags integration ./...
+        # PROBAVI_IT_K8S=1: with cluster setup done above, an unreachable
+        # cluster is a hard failure — the k8s tests must never silently
+        # skip the axis this job exists to prove.
+        run: PROBAVI_IT_K8S=1 go test -race -tags integration ./...
 
   vulncheck:
     name: Known-vulnerability scan

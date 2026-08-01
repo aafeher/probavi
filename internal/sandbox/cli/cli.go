@@ -1,4 +1,7 @@
-package docker
+// Package cli provides the subprocess plumbing shared by sandbox providers
+// that shell out to an already-verified host binary (docker, kubectl)
+// instead of dragging an SDK module tree into a trust product.
+package cli
 
 import (
 	"bytes"
@@ -11,17 +14,19 @@ import (
 	"github.com/aafeher/probavi/internal/sandbox"
 )
 
-// runner abstracts subprocess execution so provider logic is unit-testable
-// without Docker; execRunner is the real implementation.
-type runner interface {
-	// run executes name with args. err reports spawn/context failures only;
+// Runner abstracts subprocess execution so provider logic is unit-testable
+// without the real CLI; ExecRunner is the real implementation.
+type Runner interface {
+	// Run executes name with args. err reports spawn/context failures only;
 	// a non-zero exit code is returned in exitCode with err == nil.
-	run(ctx context.Context, stdin io.Reader, name string, args ...string) (stdout, stderr []byte, truncated bool, exitCode int, err error)
+	Run(ctx context.Context, stdin io.Reader, name string, args ...string) (stdout, stderr []byte, truncated bool, exitCode int, err error)
 }
 
-type execRunner struct{}
+// ExecRunner runs commands with os/exec.
+type ExecRunner struct{}
 
-func (execRunner) run(ctx context.Context, stdin io.Reader, name string, args ...string) ([]byte, []byte, bool, int, error) {
+// Run implements Runner.
+func (ExecRunner) Run(ctx context.Context, stdin io.Reader, name string, args ...string) ([]byte, []byte, bool, int, error) {
 	var out, errOut limitedWriter
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin = stdin
