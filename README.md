@@ -150,13 +150,13 @@ Probavi deliberately has no built-in scheduler — cron or a systemd timer owns 
 0 2 * * *  probavi  flock -n /run/probavi-orders.lock probavi run --config /etc/probavi/orders.yaml
 ```
 
-The evidence store additionally holds its own single-writer lock, so overlapping drills against the same log fail fast instead of interleaving. Prometheus metrics land in the configured textfile for node_exporter; audit report export arrives in Phase 3.
+The evidence store additionally holds its own single-writer lock, so overlapping drills against the same log fail fast instead of interleaving. Prometheus metrics land in the configured textfile for node_exporter — the last run's headline numbers plus rolling restore-duration quantiles recomputed from the evidence log itself (`probavi_restore_duration_rolling_seconds{quantile="0.5"|"0.95"|"1"}` over the last 100 restores). Two alert rules cover most needs: `time() - probavi_last_success_timestamp_seconds > 172800` ("no proven restore for two days") and `probavi_restore_duration_rolling_seconds{quantile="0.95"} > <your RTO>` ("restores are drifting past the objective"). Audit report export arrives in Phase 3.
 
 ## Design principles
 
 - **Build on top of backup tools, never replace them.** Probavi orchestrates and verifies; pgBackRest and friends keep doing what they do best.
 - **Engine support via adapters.** Adapters are external processes speaking a small JSON protocol over stdio — any language, community-extensible. The core never contains engine-specific logic.
-- **Sandboxes are pluggable.** Docker first; Kubernetes Jobs and remote hosts later. The core only asks for "a disposable runtime".
+- **Sandboxes are pluggable.** Docker containers and Kubernetes Jobs today, remote hosts later. The core only asks for "a disposable runtime".
 - **Evidence is the product.** Every run appends a hash-chained, ed25519-signed record. History cannot be silently rewritten, and third parties can verify it without trusting your dashboard.
 
 ## Non-goals

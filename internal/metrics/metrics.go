@@ -1,12 +1,17 @@
 // Package metrics writes drill outcomes in the Prometheus textfile
 // exposition format — plain text, atomically renamed into place, no
-// client library dependency (AGENTS.md: minimal and boring).
+// client library dependency (AGENTS.md: minimal and boring). Trend data
+// comes from the evidence log itself: Probavi has no daemon, so rolling
+// quantiles are recomputed after each drill from the canonical history.
 package metrics
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,11 +19,85 @@ import (
 	"github.com/aafeher/probavi/internal/evidence"
 )
 
-// WriteTextfile renders the record's headline metrics and atomically
-// replaces the file at path (node_exporter textfile collector contract:
-// readers must never observe a half-written file).
-func WriteTextfile(path string, rec *evidence.Record) error {
-	content, err := render(rec)
+// TrendWindow is how many recent restore samples feed the rolling
+// quantiles. With daily drills this is roughly a quarter of history —
+// enough for a stable P95, short enough that regressions surface.
+const TrendWindow = 100
+
+// Trend summarizes restore durations (integer milliseconds, like the
+// records they come from) over the most recent TrendWindow drills of one
+// drill name that completed a restore.
+type Trend struct {
+	Samples int
+	P50     int64
+	P95     int64
+	Max     int64
+}
+
+// RestoreTrend scans an evidence log and computes the rolling
+// restore-duration quantiles for one drill. Metrics are observability,
+// not evidence: unparseable lines are skipped and signatures are not
+// checked — `probavi evidence verify` is the integrity tool.
+func RestoreTrend(logPath, drillName string) (*Trend, error) {
+	f, err := os.Open(filepath.Clean(logPath))
+	if err != nil {
+		return nil, fmt.Errorf("open evidence log: %w", err)
+	}
+	defer f.Close() //nolint:errcheck // read-only descriptor
+
+	ring := make([]int64, 0, TrendWindow)
+	count := 0
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), evidence.MaxRecordBytes)
+	for sc.Scan() {
+		rec := evidence.Record{}
+		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+			continue // torn tail or crash artifact; verify reports those
+		}
+		if rec.Drill.Name != drillName || rec.Timings.Restore == nil {
+			continue
+		}
+		if len(ring) < TrendWindow {
+			ring = append(ring, *rec.Timings.Restore)
+		} else {
+			ring[count%TrendWindow] = *rec.Timings.Restore
+		}
+		count++
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("scan evidence log: %w", err)
+	}
+	if len(ring) == 0 {
+		return &Trend{}, nil
+	}
+	sorted := append([]int64(nil), ring...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	return &Trend{
+		Samples: len(sorted),
+		P50:     quantile(sorted, 0.50),
+		P95:     quantile(sorted, 0.95),
+		Max:     sorted[len(sorted)-1],
+	}, nil
+}
+
+// quantile is the nearest-rank quantile of an ascending-sorted sample set.
+func quantile(sorted []int64, q float64) int64 {
+	rank := int(float64(len(sorted))*q + 0.9999999)
+	if rank < 1 {
+		rank = 1
+	}
+	if rank > len(sorted) {
+		rank = len(sorted)
+	}
+	return sorted[rank-1]
+}
+
+// WriteTextfile renders the record's headline metrics plus the rolling
+// trend (nil or empty: omitted) and atomically replaces the file at path
+// (node_exporter textfile collector contract: readers must never observe
+// a half-written file).
+func WriteTextfile(path string, rec *evidence.Record, trend *Trend) error {
+	content, err := render(rec, trend)
 	if err != nil {
 		return err
 	}
@@ -32,7 +111,7 @@ func WriteTextfile(path string, rec *evidence.Record) error {
 	return nil
 }
 
-func render(rec *evidence.Record) (string, error) {
+func render(rec *evidence.Record, trend *Trend) (string, error) {
 	ts, err := time.Parse(evidence.TimestampFormat, rec.TS)
 	if err != nil {
 		return "", fmt.Errorf("record ts: %w", err)
@@ -65,7 +144,29 @@ func render(rec *evidence.Record) (string, error) {
 			"Unix time of the last drill that proved the backup restorable.",
 			label, formatFloat(float64(ts.UnixMilli())/1000))
 	}
+	renderTrend(b, label, trend)
 	return b.String(), nil
+}
+
+// renderTrend emits the alert-friendly rolling series: quantiles as one
+// metric with a quantile label (alert on {quantile="0.95"}), plus the
+// sample count so dashboards can tell a stable P95 from a two-sample one.
+func renderTrend(b *strings.Builder, label string, trend *Trend) {
+	if trend == nil || trend.Samples == 0 {
+		return
+	}
+	const name = "probavi_restore_duration_rolling_seconds"
+	fmt.Fprintf(b, "# HELP %s Rolling restore-duration quantiles over the most recent drills (window %d).\n# TYPE %s gauge\n",
+		name, TrendWindow, name)
+	for _, s := range []struct {
+		q  string
+		ms int64
+	}{{"0.5", trend.P50}, {"0.95", trend.P95}, {"1", trend.Max}} {
+		fmt.Fprintf(b, "%s{%s,quantile=%q} %s\n", name, label, s.q, formatFloat(float64(s.ms)/1000))
+	}
+	writeMetric(b, "probavi_restore_trend_samples",
+		"Number of restore-duration samples inside the rolling window.",
+		label, strconv.Itoa(trend.Samples))
 }
 
 func writeMetric(b *strings.Builder, name, help, label, value string) {
