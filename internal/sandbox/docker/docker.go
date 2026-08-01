@@ -7,6 +7,15 @@
 // never emits -p; network defaults to "none" (loopback only); containers
 // are labeled and removed with their volumes. Restored sandboxes contain
 // production data.
+//
+// The provider works unchanged against a remote daemon selected with
+// DOCKER_HOST=ssh://user@host (the CLI's native SSH transport): exec
+// streams stdin through the client and put_file uses docker cp, so backup
+// bytes travel over the SSH connection, never a published port. The
+// endpoint stays in the environment on purpose — sandbox params are
+// recorded verbatim in evidence records, and connection details must
+// never appear there (evidence-schema.md §8). Sweeps are host-scoped (see
+// isOrphan), so several drill hosts may safely share one daemon.
 package docker
 
 import (
@@ -35,6 +44,11 @@ const (
 	// labelPID records the creating process, so the sweep can tell an
 	// orphan (owner dead) from a concurrently running drill's sandbox.
 	labelPID = "com.probavi.pid"
+	// labelHost scopes the sweep: pid liveness is only checkable on the
+	// host that created the sandbox, and with DOCKER_HOST=ssh://… several
+	// drill hosts may share one daemon. The sweep never touches other
+	// hosts' containers.
+	labelHost = "com.probavi.host"
 
 	scratchDir     = "/tmp"
 	awaitInterval  = 250 * time.Millisecond
@@ -47,6 +61,7 @@ type Provider struct {
 	run    cli.Runner
 	logger *slog.Logger
 	pid    int
+	hostID string
 
 	awaitInterval time.Duration
 	awaitCap      time.Duration
@@ -62,6 +77,7 @@ func New(logger *slog.Logger) *Provider {
 		run:           cli.ExecRunner{},
 		logger:        logger,
 		pid:           os.Getpid(),
+		hostID:        sandbox.HostID(),
 		awaitInterval: awaitInterval,
 		awaitCap:      maxAwaitUptime,
 	}
@@ -134,12 +150,18 @@ func (p *Provider) SweepOrphans(ctx context.Context) ([]string, error) {
 	return removed, nil
 }
 
-// isOrphan reports whether the container's owner process is gone. A missing
-// or malformed pid label counts as orphaned: the container carries our
-// label but lost its ownership metadata.
+// isOrphan reports whether the container's owner process is gone. Another
+// drill host's container is never our orphan: pid liveness is only
+// checkable where the owner runs, so the sweep skips foreign host labels
+// and leaves those containers to their own host's sweep. A missing host
+// label means a pre-label probavi created the container — those were
+// host-local by definition, so the pid rule still applies (upgrade every
+// drill host before pointing several at one shared daemon). A missing or
+// malformed pid label counts as orphaned: the container carries our label
+// but lost its ownership metadata.
 func (p *Provider) isOrphan(ctx context.Context, id string) (bool, error) {
 	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin,
-		"inspect", "-f", `{{ index .Config.Labels "`+labelPID+`" }}`, id)
+		"inspect", "-f", `{{ index .Config.Labels "`+labelHost+`" }}|{{ index .Config.Labels "`+labelPID+`" }}`, id)
 	if err != nil {
 		return false, fmt.Errorf("inspect %s: %w", id, err)
 	}
@@ -151,7 +173,16 @@ func (p *Provider) isOrphan(ctx context.Context, id string) (bool, error) {
 		}
 		return false, fmt.Errorf("inspect %s: docker inspect exited %d: %s", id, exit, firstLine(stderr))
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(stdout)))
+	host, pidLabel, found := strings.Cut(strings.TrimSpace(string(stdout)), "|")
+	if !found {
+		// The format always emits the separator; anything else means the
+		// labels are unreadable — ownership metadata is gone.
+		return true, nil
+	}
+	if host != "" && host != p.hostID {
+		return false, nil
+	}
+	pid, err := strconv.Atoi(pidLabel)
 	if err != nil || pid <= 0 {
 		return true, nil
 	}
@@ -269,6 +300,7 @@ func (p *Provider) runArgs(params map[string]string) ([]string, error) {
 		"--name", "probavi-sbx-" + randomSuffix(),
 		"--label", LabelSandbox + "=1",
 		"--label", labelPID + "=" + strconv.Itoa(p.pid),
+		"--label", labelHost + "=" + p.hostID,
 		"--network", network,
 	}
 	for _, k := range sortedKeys(params) {

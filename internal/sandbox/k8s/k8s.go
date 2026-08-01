@@ -24,7 +24,6 @@ package k8s
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -89,7 +88,7 @@ func New(logger *slog.Logger) *Provider {
 		run:           cli.ExecRunner{},
 		logger:        logger,
 		pid:           os.Getpid(),
-		hostID:        hostID(),
+		hostID:        sandbox.HostID(),
 		awaitInterval: awaitInterval,
 		awaitCap:      maxAwaitRunning,
 	}
@@ -516,18 +515,6 @@ type podList struct {
 			} `json:"containerStatuses"`
 		} `json:"status"`
 	} `json:"items"`
-}
-
-// hostID fingerprints this host the same way evidence records do
-// (evidence-schema.md §3 env.host_id): raw hostnames never leave the host,
-// and label values stay within Kubernetes' character rules.
-func hostID() string {
-	name, err := os.Hostname()
-	if err != nil {
-		name = "unknown-host"
-	}
-	sum := sha256.Sum256([]byte(name))
-	return hex.EncodeToString(sum[:])[:16]
 }
 
 func sortedKeys(m map[string]string) []string {
