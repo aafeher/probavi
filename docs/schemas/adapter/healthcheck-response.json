@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/adapter/healthcheck-response.json",
+  "title": "Probavi adapter protocol v0 — healthcheck response payload",
+  "description": "The health verdict for a provisioned instance (adapter-protocol.md §6.3). healthy: false with ok: true is a valid outcome — the check ran, the verdict is negative.",
+  "$comment": "Derived from docs/adapter-protocol.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "healthy": { "type": "boolean" },
+    "latency_seconds": { "type": "number", "minimum": 0 },
+    "detail": { "type": "string" }
+  },
+  "required": ["healthy", "latency_seconds", "detail"],
+  "additionalProperties": false
+}

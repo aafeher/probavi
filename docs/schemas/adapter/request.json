@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/adapter/request.json",
+  "title": "Probavi adapter protocol v0 — request (core → adapter)",
+  "description": "The single request message the core writes to the adapter's stdin, one per operation (adapter-protocol.md §3.1). The payload shape depends on op.",
+  "$comment": "Derived from docs/adapter-protocol.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "protocol": { "const": "probavi-adapter/0" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "op": { "enum": ["probe", "provision", "healthcheck", "teardown"] },
+    "payload": { "type": "object" }
+  },
+  "required": ["protocol", "request_id", "op", "payload"],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "op": { "const": "probe" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "description": "The probe request payload is the empty object (§6.1).",
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "op": { "const": "provision" } } },
+      "then": { "properties": { "payload": { "$ref": "provision-request.json" } } }
+    },
+    {
+      "if": { "properties": { "op": { "const": "healthcheck" } } },
+      "then": { "properties": { "payload": { "$ref": "healthcheck-request.json" } } }
+    },
+    {
+      "if": { "properties": { "op": { "const": "teardown" } } },
+      "then": { "properties": { "payload": { "$ref": "teardown-request.json" } } }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/adapter/provision-request.json",
+  "title": "Probavi adapter protocol v0 — provision request payload",
+  "description": "Backup source, sandbox guarantees, and optional PITR target handed to the adapter (adapter-protocol.md §6.2). Secrets never appear here: credentials travel in environment variables whose names are listed in source.credential_env (§2.5).",
+  "$comment": "Derived from docs/adapter-protocol.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "params": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Engine-specific drill-config settings, passed through the core untouched."
+        },
+        "credential_env": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Names of environment variables passed through to the adapter process — names only, never values."
+        }
+      },
+      "required": ["kind", "path", "params", "credential_env"],
+      "additionalProperties": false
+    },
+    "sandbox": {
+      "type": "object",
+      "properties": {
+        "scratch_dir": { "type": "string", "minLength": 1 }
+      },
+      "required": ["scratch_dir"],
+      "additionalProperties": false
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "pitr": {
+      "type": "object",
+      "description": "Present only when the drill requests point-in-time recovery and probe declared pitr: true for the chosen source kind.",
+      "properties": {
+        "target_time": { "$ref": "#/$defs/rfc3339" }
+      },
+      "required": ["target_time"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["source", "sandbox", "options"],
+  "additionalProperties": false,
+  "$defs": {
+    "rfc3339": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$"
+    }
+  }
+}

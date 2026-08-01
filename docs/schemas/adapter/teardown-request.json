@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/adapter/teardown-request.json",
+  "title": "Probavi adapter protocol v0 — teardown request payload",
+  "description": "State from provision (empty object if provision crashed before returning) and the teardown reason (adapter-protocol.md §6.4).",
+  "$comment": "Derived from docs/adapter-protocol.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "state": { "type": "object" },
+    "reason": { "enum": ["completed", "failed", "timeout", "cancelled"] }
+  },
+  "required": ["state", "reason"],
+  "additionalProperties": false
+}

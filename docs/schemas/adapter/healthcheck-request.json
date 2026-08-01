@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/adapter/healthcheck-request.json",
+  "title": "Probavi adapter protocol v0 — healthcheck request payload",
+  "description": "Connection and state, both exactly as returned by provision (adapter-protocol.md §6.3).",
+  "$comment": "Derived from docs/adapter-protocol.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "connection": { "$ref": "provision-response.json#/$defs/connection" },
+    "state": { "type": "object" }
+  },
+  "required": ["connection", "state"],
+  "additionalProperties": false
+}

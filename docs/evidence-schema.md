@@ -1,10 +1,13 @@
 # Probavi Evidence Schema — v1
 
-Status: **v1 — approved by the maintainer 2026-08-01. NORMATIVE.**
-The evidence format is the product's core trust artifact; treat every field
-and byte here as a public API. Any change requires a schema version bump in
-this document before any code changes. The key words MUST, MUST NOT, SHOULD,
-and MAY are to be interpreted as described in RFC 2119.
+Status: **v1 — approved by the maintainer 2026-08-01; FROZEN 2026-08-01.
+NORMATIVE.** The evidence format is the product's core trust artifact; treat
+every field and byte here as a public API. Any change requires a schema
+version bump in this document before any code changes. The key words MUST,
+MUST NOT, SHOULD, and MAY are to be interpreted as described in RFC 2119.
+A machine-readable JSON Schema covering every published version lives at
+`docs/schemas/evidence/record.json` (derived from this document; on any
+disagreement this document wins).
 
 Schema identifier: `probavi-evidence/1`. Writers emit v1; verifiers MUST
 also accept records declaring `probavi-evidence/0` (§10).
@@ -308,12 +311,21 @@ Published versions and migration notes:
 | `probavi-evidence/0` | v1 without `drill.pitr_target`. | None — v0 records lack the field entirely (fixed shape per version) and remain valid forever under v0. Writers emit v1 from 2026-08-01. |
 | `probavi-evidence/1` | Current (§3). | — |
 
-## 11. Remaining before v1 freeze
+## 11. v1 freeze
 
-- [ ] Machine-readable JSON Schema (`docs/schemas/evidence/record.json`),
-      verified in CI against the golden-file tests.
-- [ ] Worked example: a complete 3-record log with a test keypair, byte
-      exact, committed as golden files with the Phase 1 implementation.
+**v1 is frozen as of 2026-08-01** — every item below is complete. Any
+further change to this schema is a version bump (§10).
+
+- [x] Machine-readable JSON Schema (`docs/schemas/evidence/record.json`),
+      covering both published versions, verified in CI against the
+      golden-file tests plus mutation samples (`internal/spec`).
+      Done 2026-08-01.
+- [x] Worked example: byte-exact 3-record logs for both published versions
+      (`internal/evidence/testdata/log_v0.golden`, `log_v1.golden`) with the
+      signer's public key committed alongside (`testdata/signer.pub`; the
+      key pair is the deterministic test key with seed bytes 0x00…0x1f). CI
+      verifies both logs offline with only the committed public key.
+      Done 2026-08-01.
 
 ## Changelog
 
@@ -322,7 +334,9 @@ Published versions and migration notes:
   drill's compliance claim is "restorable *to instant T*"; without T in the
   signed record the claim would rest on unsigned logs. Approved by the
   maintainer 2026-08-01. No other shape or byte-level change; v0 records
-  remain valid under v0 (§10).
+  remain valid under v0 (§10). Addendum (same day, no byte-level change):
+  machine-readable JSON Schema added at `docs/schemas/evidence/record.json`
+  and the worked-example public key committed — §11 complete, **v1 frozen**.
 - v0 (2026-07-31): initial complete draft. Canonicalization decided:
   RFC 8785 JCS restricted to integer-only numbers (maintainer decision
   2026-07-31). Per-phase integer-millisecond timings aligned with adapter

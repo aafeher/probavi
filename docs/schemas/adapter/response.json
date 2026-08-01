@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/adapter/response.json",
+  "title": "Probavi adapter protocol v0 — final response (adapter → core)",
+  "description": "The exactly-once final response ending an operation (adapter-protocol.md §3.4). The payload is op-specific; validate it separately against the matching *-response.json schema.",
+  "$comment": "Derived from docs/adapter-protocol.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "protocol": { "const": "probavi-adapter/0" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "ok": { "type": "boolean" },
+    "payload": { "type": "object" },
+    "error": { "$ref": "error.json" }
+  },
+  "required": ["protocol", "request_id", "ok"],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": { "ok": { "const": true } },
+      "required": ["payload"],
+      "not": { "required": ["error"] }
+    },
+    {
+      "properties": { "ok": { "const": false } },
+      "required": ["error"],
+      "not": { "required": ["payload"] }
+    }
+  ]
+}

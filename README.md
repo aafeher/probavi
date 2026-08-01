@@ -20,7 +20,7 @@ The output is not a green checkmark. It is an auditable, cryptographically verif
 
 ## Status
 
-**Pre-alpha, working end to end for PostgreSQL and MySQL.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`) and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative; third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. Not yet released — packaging and polish remain. See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
+**Pre-alpha, working end to end for PostgreSQL and MySQL.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`) and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative and frozen, with machine-readable JSON Schemas in [docs/schemas/](docs/schemas/); third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. Not yet released — packaging and polish remain. See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
 
 ## Shape
 
@@ -165,7 +165,7 @@ Probavi will **not**: take backups, implement its own scheduler, manage database
 
 ## Contributing
 
-The adapter protocol and evidence schema specs in `docs/` are normative (v0) — feedback on them is the most valuable contribution right now; open an issue. Code contributions are welcome under DCO sign-off (`git commit -s`): start with `AGENTS.md` (the engineering rules this repo is held to) and the skills under `.claude/skills/`, which double as contributor guides for adapter and evidence work. New adapters can be built in any language from `docs/adapter-protocol.md` alone — that is the point of the protocol.
+The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative and frozen — feedback on them is the most valuable contribution right now; open an issue. Machine-readable JSON Schemas for both live in `docs/schemas/`. Code contributions are welcome under DCO sign-off (`git commit -s`): start with `AGENTS.md` (the engineering rules this repo is held to) and the skills under `.claude/skills/`, which double as contributor guides for adapter and evidence work. New adapters can be built in any language from `docs/adapter-protocol.md` alone — that is the point of the protocol.
 
 ## Development transparency
 

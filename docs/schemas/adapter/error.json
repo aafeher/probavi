@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/adapter/error.json",
+  "title": "Probavi adapter protocol v0 — error object",
+  "description": "The error object used in final responses and sandbox results (adapter-protocol.md §5). The registry of codes is frozen for v0; extending it requires a protocol version bump.",
+  "$comment": "Derived from docs/adapter-protocol.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "code": {
+      "enum": [
+        "invalid_request",
+        "unsupported_protocol",
+        "unsupported_source",
+        "source_not_found",
+        "source_unreadable",
+        "source_corrupt",
+        "restore_failed",
+        "engine_not_ready",
+        "sandbox_error",
+        "timeout",
+        "cancelled",
+        "adapter_crash",
+        "internal"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable, single line, no secrets.",
+      "pattern": "^[^\\r\\n]*$"
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "detail": {
+      "type": "object",
+      "description": "Machine-readable extras (e.g. the supported protocol list). No secrets."
+    }
+  },
+  "required": ["code", "message", "retryable"],
+  "additionalProperties": false
+}
