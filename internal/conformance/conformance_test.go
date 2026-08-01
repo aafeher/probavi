@@ -1,0 +1,244 @@
+package conformance
+
+import (
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
+
+// TestMain lets this test binary double as the fake adapter: when the mode
+// variable is set (inherited by the child processes the suite spawns), the
+// process behaves as an adapter instead of running tests.
+func TestMain(m *testing.M) {
+	if mode := os.Getenv("PROBAVI_FAKE_ADAPTER"); mode != "" {
+		os.Exit(fakeMain(mode))
+	}
+	os.Exit(m.Run())
+}
+
+func runSuite(t *testing.T, mode string, opts Options) *Report {
+	t.Helper()
+	t.Setenv("PROBAVI_FAKE_ADAPTER", mode)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	report, err := Run(ctx, self, opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return report
+}
+
+func check(t *testing.T, report *Report, name string) Check {
+	t.Helper()
+	for _, c := range report.Checks {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("check %q missing from report %+v", name, report.Checks)
+	return Check{}
+}
+
+// frozenList is the exact §10 order; drifting from it is a spec violation.
+var frozenList = []string{
+	"probe.shape", "probe.sql_runner", "probe.no_sandbox_calls",
+	"handshake.unsupported_protocol", "handshake.unknown_op",
+	"provision.malformed_payload", "provision.unsupported_source",
+	"provision.missing_source", "provision.happy_path", "provision.timings",
+	"healthcheck.shape", "teardown.empty_state", "teardown.idempotent",
+	"sigterm.cancels", "framing.discipline",
+}
+
+func TestConformantAdapterPassesEverything(t *testing.T) {
+	report := runSuite(t, "conformant", Options{})
+	if report.Failed != 0 || report.Passed != len(frozenList) {
+		t.Fatalf("report = %d passed / %d failed: %+v", report.Passed, report.Failed, report.Checks)
+	}
+	names := make([]string, 0, len(report.Checks))
+	for _, c := range report.Checks {
+		names = append(names, c.Name)
+	}
+	if !slices.Equal(names, frozenList) {
+		t.Errorf("check list = %v\nwant the frozen §10 order %v", names, frozenList)
+	}
+}
+
+func TestViolationsAreDetected(t *testing.T) {
+	tests := []struct {
+		mode      string
+		check     string
+		detailSub string
+		opts      Options
+	}{
+		{"no-detail", "handshake.unsupported_protocol", "detail", Options{}},
+		{"stdout-noise", "framing.discipline", "not a protocol message", Options{}},
+		{"double-final", "framing.discipline", "after the final response", Options{}},
+		{"wrong-echo", "framing.discipline", "not echoed", Options{}},
+		{"huge-frame", "framing.discipline", "4 MiB", Options{}},
+		{"crash-on-probe", "probe.shape", "ok final response", Options{}},
+		{"bad-name", "probe.shape", "must match", Options{}},
+		{"no-protocol-version", "probe.shape", "protocol_versions", Options{}},
+		{"empty-sources", "probe.shape", "source kind", Options{}},
+		{"empty-kind-name", "probe.shape", "kind is empty", Options{}},
+		{"bare-message", "framing.discipline", "neither sandbox_call nor final", Options{}},
+		{"bad-verb", "probe.shape", "exec and put_file", Options{}},
+		{"probe-sandbox-call", "probe.no_sandbox_calls", "forbids", Options{}},
+		{"no-sql-placeholder", "probe.sql_runner", "{{sql}}", Options{}},
+		{"password-in-argv", "probe.sql_runner", "{{password}}", Options{}},
+		{"bad-timings", "provision.timings", "exceeds", Options{}},
+		{"negative-timings", "provision.timings", "negative", Options{}},
+		{"bad-checksum", "provision.happy_path", "checksum", Options{}},
+		{"empty-scheme", "provision.happy_path", "scheme", Options{}},
+		{"bad-state", "provision.happy_path", "state", Options{}},
+		{"bad-created-at", "provision.happy_path", "RFC 3339", Options{}},
+		{"crash-on-malformed", "provision.malformed_payload", "invalid_request", Options{}},
+		{"wrong-missing-code", "provision.missing_source", "source_not_found", Options{}},
+		{"unhealthy-error", "healthcheck.shape", "ok:true", Options{}},
+		{"negative-latency", "healthcheck.shape", "negative", Options{}},
+		{"no-healthy-field", "healthcheck.shape", "boolean healthy", Options{}},
+		{"teardown-empty-fails", "teardown.empty_state", "crash case", Options{}},
+		{"teardown-third-fails", "teardown.idempotent", "both succeed", Options{}},
+		{"ignore-sigterm", "sigterm.cancels", "after SIGTERM", Options{}},
+		{"hang-on-sigterm", "sigterm.cancels", "grace", Options{Grace: 700 * time.Millisecond}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			if tt.mode == "teardown-third-fails" {
+				t.Setenv("PROBAVI_FAKE_COUNTER", tempCounterPath(t))
+			}
+			report := runSuite(t, tt.mode, tt.opts)
+			c := check(t, report, tt.check)
+			if c.OK {
+				t.Fatalf("check %s passed for violation mode %s: %+v", tt.check, tt.mode, report.Checks)
+			}
+			if !strings.Contains(c.Detail, tt.detailSub) {
+				t.Errorf("detail = %q, want it to mention %q", c.Detail, tt.detailSub)
+			}
+		})
+	}
+}
+
+func TestSourceKindOverride(t *testing.T) {
+	t.Setenv("PROBAVI_FAKE_ADAPTER", "conformant")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable: %v", err)
+	}
+	// The fake declares fakedump only: forcing another kind must turn the
+	// happy path into unsupported_source failures.
+	report, err := Run(context.Background(), self, Options{SourceKind: "not-a-kind"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if c := check(t, report, "provision.happy_path"); c.OK {
+		t.Error("happy path with a forced unknown kind must fail")
+	}
+	if c := check(t, report, "provision.missing_source"); c.OK {
+		t.Error("missing-source with a forced unknown kind must fail — the adapter reports unsupported_source instead")
+	}
+}
+
+func TestSigtermWithNothingToInterrupt(t *testing.T) {
+	// A provision that never touches the sandbox leaves the §2.4 scenario
+	// nothing to interrupt; the check passes vacuously instead of hanging.
+	report := runSuite(t, "no-calls-provision", Options{})
+	if c := check(t, report, "sigterm.cancels"); !c.OK {
+		t.Errorf("sigterm.cancels = %+v, want vacuous pass", c)
+	}
+}
+
+func TestSupportedListed(t *testing.T) {
+	ok := func(detail string) *envelope {
+		return &envelope{Error: &wireError{Detail: []byte(detail)}}
+	}
+	for name, tt := range map[string]struct {
+		final *envelope
+		want  bool
+	}{
+		"nil final":      {nil, false},
+		"no error":       {&envelope{}, false},
+		"no detail":      {&envelope{Error: &wireError{}}, false},
+		"not json":       {ok(`"supported"`), false},
+		"empty list":     {ok(`{"supported":[]}`), false},
+		"versions given": {ok(`{"supported":["probavi-adapter/0"]}`), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := supportedListed(tt.final); got != tt.want {
+				t.Errorf("supportedListed = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExitless(t *testing.T) {
+	if err := exitless(nil); err != nil {
+		t.Errorf("exitless(nil) = %v", err)
+	}
+	cmd := exec.Command("sh", "-c", "exit 3")
+	if err := exitless(cmd.Run()); err != nil {
+		t.Errorf("exit statuses must be filtered, got %v", err)
+	}
+	sentinel := errors.New("harness trouble")
+	if err := exitless(sentinel); !errors.Is(err, sentinel) {
+		t.Errorf("real errors must pass through, got %v", err)
+	}
+}
+
+func TestUndefinedVerbIsAnsweredNotCrashed(t *testing.T) {
+	// The simulated sandbox answers an undefined verb with an error result;
+	// the fake ignores it and completes, so the drill-shaped checks stay
+	// green — the incident is between the adapter and its sandbox result.
+	report := runSuite(t, "weird-verb", Options{})
+	if c := check(t, report, "provision.happy_path"); !c.OK {
+		t.Errorf("happy path = %+v, want ok despite the refused verb", c)
+	}
+}
+
+func TestRunUnstartableAdapter(t *testing.T) {
+	_, err := Run(context.Background(), "/nonexistent/probavi-adapter-void", Options{})
+	if err == nil {
+		t.Fatal("Run must report an unstartable adapter as a harness error, not a verdict")
+	}
+}
+
+func TestRunHonorsContext(t *testing.T) {
+	t.Setenv("PROBAVI_FAKE_ADAPTER", "hang-on-probe")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	report, err := Run(ctx, self, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if time.Since(start) > 30*time.Second {
+		t.Fatal("Run ignored the cancelled context")
+	}
+	if c := check(t, report, "probe.shape"); c.OK {
+		t.Error("a probe killed by the context cannot pass")
+	}
+}
+
+func tempCounterPath(t *testing.T) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "counter")
+	if err != nil {
+		t.Fatalf("temp counter: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close counter: %v", err)
+	}
+	return f.Name()
+}
