@@ -26,9 +26,11 @@ import (
 	"github.com/aafeher/probavi/internal/sandbox/k8s"
 )
 
-// version is stamped into evidence records; releases will set it via
-// -ldflags.
-const version = "0.1.0-dev"
+// version is stamped into evidence records and printed by `probavi
+// version`. Release builds override it with
+// -ldflags "-X main.version=<semver>"; anything built without that is a
+// dev build and says so.
+var version = "0.1.0-dev"
 
 // Exit codes for `probavi run` (cron/CI contract, documented in usage).
 const (

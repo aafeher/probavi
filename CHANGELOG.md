@@ -1,0 +1,62 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Pre-1.0, minor versions may contain breaking changes; every one of them is
+recorded here. The adapter protocol and the evidence schema carry their own
+versions, independent of the binary (see `docs/`); changes to either are
+always called out explicitly.
+
+## [Unreleased]
+
+## [0.1.0] - 2026-08-01
+
+First tagged release. Everything below is new.
+
+### Added
+
+- `probavi run`: config-driven restore drills — disposable sandbox up,
+  backup restored by an engine adapter, validation checks, guaranteed
+  teardown, and exactly one signed evidence record per started drill, on
+  every path including crashes and cancellation. Cron/CI-friendly exit
+  codes; no built-in scheduler by design.
+- **Adapter protocol v0** (`docs/adapter-protocol.md`, frozen): engine
+  adapters are external processes speaking line-delimited JSON on
+  stdin/stdout, acting on the sandbox only through core-mediated verbs
+  (`exec`, `put_file`). Machine-readable JSON Schemas for every message
+  shape in `docs/schemas/adapter/`.
+- **PostgreSQL adapter**: `pgdump`, `pgdump_dir` (logical), `pgbackrest`
+  (physical) sources; point-in-time recovery on pgBackRest sources.
+- **MySQL/MariaDB adapter**: `mysqldump`, `mysqldump_dir` (logical),
+  `xtrabackup` (Percona XtraBackup, physical) sources.
+- Point-in-time recovery drills: `target.pitr` drill config with exactly
+  one of `target_time` (absolute) or `target_age` (relative, resolved at
+  drill start); the resolved instant is recorded in evidence as
+  `drill.pitr_target`.
+- Sandbox providers: **Docker** (zero-ingress defaults: no published
+  ports, `--network none`) and **Kubernetes Job** (no service-account
+  token, cluster-side cleanup backstop); both drive the respective CLI,
+  label every resource, and sweep orphans on startup.
+- **Evidence store** (`docs/evidence-schema.md` v1, frozen): append-only
+  JSONL, RFC 8785 canonical bytes, SHA-256 hash chain, ed25519 signatures.
+  `probavi evidence verify` proves a log offline with only the public key;
+  `probavi evidence keygen` generates key pairs. Machine-readable schema
+  covering all published record versions in `docs/schemas/evidence/`.
+- Validation checks: `service_healthy`, `table_exists`, `row_count`,
+  `freshness`, and user-defined SQL assertions — engine-agnostic via the
+  adapter-declared `sql_runner` template, redaction-safe by construction.
+- `probavi adapter conformance`: the frozen 15-check protocol conformance
+  suite against a simulated sandbox — no container runtime needed; the
+  mechanical definition of done for third-party adapters, with the
+  developer guide in `docs/adapter-development.md`.
+- `probavi adapter probe`: resolve an adapter and print its capabilities.
+- Prometheus textfile metrics per drill, including rolling restore-duration
+  quantiles (p50/p95/max over the last 100 restores) for RTO trend
+  alerting.
+- `probavi version`: prints the binary version and the contract versions
+  the build speaks.
+
+[Unreleased]: https://github.com/aafeher/probavi/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/aafeher/probavi/releases/tag/v0.1.0

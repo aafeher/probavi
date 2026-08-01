@@ -9,8 +9,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aafeher/probavi/internal/adapter"
 	"github.com/aafeher/probavi/internal/evidence"
 )
+
+// TestVersionCommand pins the version output: the binary version plus both
+// contract versions, nothing on stderr, exit 0.
+func TestVersionCommand(t *testing.T) {
+	code, stdout, stderr := runCLI(t, "version")
+	if code != 0 {
+		t.Fatalf("version exit %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("version wrote to stderr: %q", stderr)
+	}
+	for _, want := range []string{"probavi " + version, adapter.ProtocolVersion, evidence.SchemaID} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("version output %q does not contain %q", stdout, want)
+		}
+	}
+}
 
 func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
