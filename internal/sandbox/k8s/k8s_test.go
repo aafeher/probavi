@@ -1,0 +1,492 @@
+package k8s
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/aafeher/probavi/internal/sandbox"
+)
+
+// deadPID is close to the default pid_max; no live process realistically
+// holds it during a test run.
+const deadPID = 2147483646
+
+type response struct {
+	stdout    string
+	stderr    string
+	truncated bool
+	exit      int
+	err       error
+}
+
+// fakeRunner scripts subprocess responses and records every invocation.
+type fakeRunner struct {
+	t         *testing.T
+	calls     [][]string
+	stdins    []string
+	responses []response
+}
+
+func (f *fakeRunner) Run(_ context.Context, stdin io.Reader, name string, args ...string) ([]byte, []byte, bool, int, error) {
+	f.t.Helper()
+	in := ""
+	if stdin != nil {
+		b, err := io.ReadAll(stdin)
+		if err != nil {
+			f.t.Fatalf("read stdin: %v", err)
+		}
+		in = string(b)
+	}
+	f.calls = append(f.calls, append([]string{name}, args...))
+	f.stdins = append(f.stdins, in)
+	if len(f.responses) == 0 {
+		f.t.Fatalf("unexpected call: %s %v", name, args)
+	}
+	r := f.responses[0]
+	f.responses = f.responses[1:]
+	return []byte(r.stdout), []byte(r.stderr), r.truncated, r.exit, r.err
+}
+
+func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) {
+	t.Helper()
+	fake := &fakeRunner{t: t, responses: responses}
+	return &Provider{
+		bin:           "kubectl",
+		run:           fake,
+		logger:        slog.New(slog.DiscardHandler),
+		pid:           os.Getpid(),
+		hostID:        "abcd1234abcd1234",
+		awaitInterval: time.Millisecond,
+		awaitCap:      50 * time.Millisecond,
+	}, fake
+}
+
+func runningPodJSON(name string) string {
+	return fmt.Sprintf(`{"items":[{"metadata":{"name":%q},"status":{"phase":"Running"}}]}`, name)
+}
+
+func TestNewDefaults(t *testing.T) {
+	p := New(nil)
+	if p.bin != "kubectl" || p.run == nil || p.logger == nil {
+		t.Errorf("New: %+v, want kubectl binary with runner and logger", p)
+	}
+	if len(p.hostID) != 16 {
+		t.Errorf("hostID = %q, want 16 hex chars", p.hostID)
+	}
+}
+
+// fullManifest builds a manifest from every supported param.
+func fullManifest(t *testing.T) (*jobManifest, *Provider) {
+	t.Helper()
+	p, _ := testProvider(t)
+	m, namespace, err := p.manifest(map[string]string{
+		"image":     "postgres:16",
+		"namespace": "drills",
+		"memory":    "2Gi",
+		"cpus":      "2",
+		"command":   "sleep  infinity",
+		"env.B_VAR": "2",
+		"env.A_VAR": "1",
+	})
+	if err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if namespace != "drills" {
+		t.Errorf("namespace = %q, want drills", namespace)
+	}
+	return m, p
+}
+
+func TestManifestJobShape(t *testing.T) {
+	m, p := fullManifest(t)
+	if m.APIVersion != "batch/v1" || m.Kind != "Job" {
+		t.Errorf("object = %s/%s, want batch/v1 Job", m.APIVersion, m.Kind)
+	}
+	if !strings.HasPrefix(m.Metadata.Name, "probavi-sbx-") {
+		t.Errorf("name = %q", m.Metadata.Name)
+	}
+	for _, labels := range []map[string]string{m.Metadata.Labels, m.Spec.Template.Metadata.Labels} {
+		if labels[LabelSandbox] != "1" || labels[labelHost] != p.hostID || labels[labelPID] != strconv.Itoa(p.pid) {
+			t.Errorf("labels = %v, want sandbox, host, and pid on job and pod", labels)
+		}
+	}
+	if m.Spec.BackoffLimit != 0 || m.Spec.ActiveDeadlineSeconds != activeDeadlineSeconds || m.Spec.TTLSecondsAfterFinished != ttlSecondsAfterFinished {
+		t.Errorf("job spec = %+v, want backoff 0 with cleanup deadlines", m.Spec)
+	}
+}
+
+func TestManifestPodShape(t *testing.T) {
+	m, _ := fullManifest(t)
+	pod := m.Spec.Template.Spec
+	if pod.RestartPolicy != "Never" || pod.AutomountServiceAccountToken || pod.EnableServiceLinks {
+		t.Errorf("pod spec = %+v, want Never restart and no token/service links", pod)
+	}
+	if pod.SecurityContext.SeccompProfile.Type != "RuntimeDefault" {
+		t.Errorf("seccomp = %+v", pod.SecurityContext)
+	}
+	c := pod.Containers[0]
+	if c.Image != "postgres:16" || !slices.Equal(c.Command, []string{"sleep", "infinity"}) {
+		t.Errorf("container = %+v, want image and whitespace-split command", c)
+	}
+	if !slices.Equal(c.Env, []envVar{{Name: "A_VAR", Value: "1"}, {Name: "B_VAR", Value: "2"}}) {
+		t.Errorf("env = %v, want sorted variables", c.Env)
+	}
+	want := map[string]string{"memory": "2Gi", "cpu": "2"}
+	if c.Resources == nil || fmt.Sprint(c.Resources.Limits) != fmt.Sprint(want) || fmt.Sprint(c.Resources.Requests) != fmt.Sprint(want) {
+		t.Errorf("resources = %+v, want requests == limits %v", c.Resources, want)
+	}
+}
+
+func TestManifestMinimal(t *testing.T) {
+	p, _ := testProvider(t)
+	m, namespace, err := p.manifest(map[string]string{"image": "x:1"})
+	if err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	if namespace != "default" {
+		t.Errorf("namespace = %q, want default", namespace)
+	}
+	c := m.Spec.Template.Spec.Containers[0]
+	if len(c.Command) != 0 || len(c.Env) != 0 || c.Resources != nil {
+		t.Errorf("container = %+v, want image entrypoint, no env, no resources", c)
+	}
+}
+
+func TestManifestRejects(t *testing.T) {
+	p, _ := testProvider(t)
+	for name, params := range map[string]map[string]string{
+		"missing image": {"namespace": "x"},
+		"unknown param": {"image": "x:1", "network": "none"},
+		"bad env name":  {"image": "x:1", "env.1BAD": "v"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := p.manifest(params); !errors.Is(err, sandbox.ErrInvalidParams) {
+				t.Errorf("manifest(%v): %v, want ErrInvalidParams", params, err)
+			}
+		})
+	}
+}
+
+func TestCreateHappyPath(t *testing.T) {
+	p, fake := testProvider(t,
+		response{stdout: "job.batch/created"},
+		response{stdout: `{"items":[]}`},
+		response{stdout: runningPodJSON("probavi-sbx-x-abc")},
+	)
+	sbx, err := p.Create(context.Background(), map[string]string{"image": "x:1", "namespace": "drills"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if sbx.pod != "probavi-sbx-x-abc" || sbx.namespace != "drills" {
+		t.Errorf("sandbox = %+v", sbx)
+	}
+	if !strings.HasPrefix(sbx.ID(), "drills/probavi-sbx-") {
+		t.Errorf("ID = %q, want namespace/name", sbx.ID())
+	}
+	if sbx.ScratchDir() != "/tmp" {
+		t.Errorf("ScratchDir = %q", sbx.ScratchDir())
+	}
+
+	create := fake.calls[0]
+	if !slices.Equal(create[:6], []string{"kubectl", "create", "-n", "drills", "-f", "-"}) {
+		t.Errorf("create call = %v", create)
+	}
+	m := jobManifest{}
+	if err := json.Unmarshal([]byte(fake.stdins[0]), &m); err != nil {
+		t.Fatalf("manifest on stdin is not JSON: %v", err)
+	}
+	if m.Metadata.Name != strings.TrimPrefix(sbx.ID(), "drills/") {
+		t.Errorf("manifest name %q vs sandbox %q", m.Metadata.Name, sbx.ID())
+	}
+	await := fake.calls[1]
+	if !slices.Contains(await, "job-name="+m.Metadata.Name) {
+		t.Errorf("await call = %v, want job-name selector", await)
+	}
+}
+
+func TestCreateFailures(t *testing.T) {
+	params := map[string]string{"image": "x:1"}
+
+	t.Run("kubectl create fails", func(t *testing.T) {
+		p, _ := testProvider(t, response{exit: 1, stderr: "error: namespace not found"})
+		if _, err := p.Create(context.Background(), params); err == nil || !strings.Contains(err.Error(), "namespace not found") {
+			t.Errorf("Create: %v, want the kubectl error surfaced", err)
+		}
+	})
+
+	t.Run("create runner error", func(t *testing.T) {
+		p, _ := testProvider(t, response{err: errors.New("kubectl not on PATH")})
+		if _, err := p.Create(context.Background(), params); err == nil {
+			t.Error("Create must surface runner errors")
+		}
+	})
+
+	t.Run("pod fails before running", func(t *testing.T) {
+		p, fake := testProvider(t,
+			response{stdout: "job.batch/created"},
+			response{stdout: `{"items":[{"metadata":{"name":"pod-1"},"status":{"phase":"Failed"}}]}`},
+			response{}, // delete during cleanup
+		)
+		_, err := p.Create(context.Background(), params)
+		if err == nil || !strings.Contains(err.Error(), "phase Failed") {
+			t.Fatalf("Create: %v, want pod-failure error", err)
+		}
+		last := fake.calls[len(fake.calls)-1]
+		if last[1] != "delete" {
+			t.Errorf("cleanup call = %v, want kubectl delete", last)
+		}
+	})
+
+	t.Run("await timeout reports last waiting reason", func(t *testing.T) {
+		pending := response{stdout: `{"items":[{"metadata":{"name":"pod-1"},"status":{"phase":"Pending","containerStatuses":[{"state":{"waiting":{"reason":"ImagePullBackOff"}}}]}}]}`}
+		p, fake := testProvider(t, append([]response{{stdout: "job.batch/created"}},
+			pending, pending, pending, pending, pending, pending, pending, pending, pending, pending,
+			pending, pending, pending, pending, pending, pending, pending, pending, pending, pending,
+			pending, pending, pending, pending, pending, pending, pending, pending, pending, pending,
+			pending, pending, pending, pending, pending, pending, pending, pending, pending, pending,
+			pending, pending, pending, pending, pending, pending, pending, pending, pending, pending,
+			pending, pending, pending, pending, pending, pending, pending, pending, pending, pending,
+			response{}, // delete during cleanup
+		)...)
+		_, err := p.Create(context.Background(), params)
+		if err == nil || !strings.Contains(err.Error(), "ImagePullBackOff") {
+			t.Fatalf("Create: %v, want the waiting reason in the error", err)
+		}
+		if fake.calls[len(fake.calls)-1][1] != "delete" {
+			t.Error("timeout must still destroy the job")
+		}
+	})
+
+	t.Run("pod list is not JSON", func(t *testing.T) {
+		p, _ := testProvider(t,
+			response{stdout: "job.batch/created"},
+			response{stdout: "not json"},
+			response{}, // delete during cleanup
+		)
+		if _, err := p.Create(context.Background(), params); err == nil || !strings.Contains(err.Error(), "parse pod list") {
+			t.Errorf("Create: %v, want parse error", err)
+		}
+	})
+}
+
+func testSandbox(t *testing.T, responses ...response) (*Sandbox, *fakeRunner) {
+	t.Helper()
+	p, fake := testProvider(t, responses...)
+	return &Sandbox{job: "probavi-sbx-1", pod: "probavi-sbx-1-abc", namespace: "drills", p: p}, fake
+}
+
+func TestExec(t *testing.T) {
+	t.Run("argv, env, and stdin", func(t *testing.T) {
+		sbx, fake := testSandbox(t, response{stdout: "out", stderr: "err", exit: 3})
+		res, err := sbx.Exec(context.Background(), sandbox.ExecRequest{
+			Argv:  []string{"psql", "-c", "SELECT 1"},
+			Env:   map[string]string{"B": "2", "A": "1"},
+			Stdin: []byte("piped"),
+		})
+		if err != nil {
+			t.Fatalf("Exec: %v", err)
+		}
+		if res.ExitCode != 3 || string(res.Stdout) != "out" || string(res.Stderr) != "err" {
+			t.Errorf("result = %+v", res)
+		}
+		want := []string{"kubectl", "exec", "-n", "drills", "-i", "probavi-sbx-1-abc", "--",
+			"env", "A=1", "B=2", "psql", "-c", "SELECT 1"}
+		if !slices.Equal(fake.calls[0], want) {
+			t.Errorf("call = %v\nwant   %v", fake.calls[0], want)
+		}
+		if fake.stdins[0] != "piped" {
+			t.Errorf("stdin = %q", fake.stdins[0])
+		}
+	})
+
+	t.Run("no env and no stdin stays plain", func(t *testing.T) {
+		sbx, fake := testSandbox(t, response{})
+		if _, err := sbx.Exec(context.Background(), sandbox.ExecRequest{Argv: []string{"true"}}); err != nil {
+			t.Fatalf("Exec: %v", err)
+		}
+		want := []string{"kubectl", "exec", "-n", "drills", "probavi-sbx-1-abc", "--", "true"}
+		if !slices.Equal(fake.calls[0], want) {
+			t.Errorf("call = %v\nwant   %v", fake.calls[0], want)
+		}
+	})
+
+	t.Run("timeout is honored", func(t *testing.T) {
+		sbx, _ := testSandbox(t)
+		sbx.p.run = timeoutRunner{}
+		start := time.Now()
+		_, err := sbx.Exec(context.Background(), sandbox.ExecRequest{Argv: []string{"sleep"}, Timeout: 10 * time.Millisecond})
+		if err == nil || time.Since(start) > 5*time.Second {
+			t.Errorf("Exec with timeout: err=%v", err)
+		}
+	})
+
+	t.Run("runner error surfaces", func(t *testing.T) {
+		sbx, _ := testSandbox(t, response{err: errors.New("spawn failed")})
+		if _, err := sbx.Exec(context.Background(), sandbox.ExecRequest{Argv: []string{"true"}}); err == nil {
+			t.Error("Exec must surface runner errors")
+		}
+	})
+}
+
+// timeoutRunner blocks until the context dies, proving deadlines propagate.
+type timeoutRunner struct{}
+
+func (timeoutRunner) Run(ctx context.Context, _ io.Reader, name string, _ ...string) ([]byte, []byte, bool, int, error) {
+	<-ctx.Done()
+	return nil, nil, false, 0, fmt.Errorf("%s: %w", name, ctx.Err())
+}
+
+func writeSource(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "backup.dump")
+	if err := os.WriteFile(path, []byte("dump-bytes"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	return path
+}
+
+func TestPutFile(t *testing.T) {
+	t.Run("streams through cat with positional dest", func(t *testing.T) {
+		sbx, fake := testSandbox(t, response{}, response{})
+		res, err := sbx.PutFile(context.Background(), writeSource(t), "/tmp/x.dump", "0644")
+		if err != nil {
+			t.Fatalf("PutFile: %v", err)
+		}
+		if res.BytesCopied != int64(len("dump-bytes")) {
+			t.Errorf("BytesCopied = %d", res.BytesCopied)
+		}
+		wantCopy := []string{"kubectl", "exec", "-n", "drills", "-i", "probavi-sbx-1-abc", "--",
+			"sh", "-c", `cat > "$1"`, "sh", "/tmp/x.dump"}
+		if !slices.Equal(fake.calls[0], wantCopy) {
+			t.Errorf("copy call = %v\nwant      %v", fake.calls[0], wantCopy)
+		}
+		if fake.stdins[0] != "dump-bytes" {
+			t.Errorf("stdin = %q, want the file content streamed", fake.stdins[0])
+		}
+		wantChmod := []string{"kubectl", "exec", "-n", "drills", "probavi-sbx-1-abc", "--", "chmod", "0644", "/tmp/x.dump"}
+		if !slices.Equal(fake.calls[1], wantChmod) {
+			t.Errorf("chmod call = %v\nwant       %v", fake.calls[1], wantChmod)
+		}
+	})
+
+	t.Run("default mode is 0600", func(t *testing.T) {
+		sbx, fake := testSandbox(t, response{}, response{})
+		if _, err := sbx.PutFile(context.Background(), writeSource(t), "/tmp/x", ""); err != nil {
+			t.Fatalf("PutFile: %v", err)
+		}
+		if !slices.Contains(fake.calls[1], "0600") {
+			t.Errorf("chmod call = %v, want default 0600", fake.calls[1])
+		}
+	})
+
+}
+
+func TestPutFileFailures(t *testing.T) {
+	src := writeSource(t)
+	sbx, _ := testSandbox(t)
+	if _, err := sbx.PutFile(context.Background(), src, "/tmp/x", "rw-"); !errors.Is(err, sandbox.ErrInvalidParams) {
+		t.Errorf("bad mode: %v, want ErrInvalidParams", err)
+	}
+	if _, err := sbx.PutFile(context.Background(), filepath.Join(t.TempDir(), "gone"), "/tmp/x", ""); err == nil {
+		t.Error("missing source must be an error")
+	}
+
+	sbx, _ = testSandbox(t, response{exit: 1, stderr: "no space left on device"})
+	if _, err := sbx.PutFile(context.Background(), src, "/tmp/x", ""); err == nil || !strings.Contains(err.Error(), "no space") {
+		t.Errorf("copy failure: %v", err)
+	}
+	sbx, _ = testSandbox(t, response{}, response{exit: 1, stderr: "chmod: not permitted"})
+	if _, err := sbx.PutFile(context.Background(), src, "/tmp/x", ""); err == nil || !strings.Contains(err.Error(), "chmod") {
+		t.Errorf("chmod failure: %v", err)
+	}
+	sbx, _ = testSandbox(t, response{err: errors.New("spawn failed")})
+	if _, err := sbx.PutFile(context.Background(), src, "/tmp/x", ""); err == nil {
+		t.Error("runner error must surface")
+	}
+}
+
+func TestDestroy(t *testing.T) {
+	t.Run("deletes with foreground cascade, idempotently", func(t *testing.T) {
+		sbx, fake := testSandbox(t, response{})
+		if err := sbx.Destroy(context.Background()); err != nil {
+			t.Fatalf("Destroy: %v", err)
+		}
+		call := fake.calls[0]
+		for _, want := range []string{"delete", "job", "probavi-sbx-1", "--cascade=foreground", "--ignore-not-found"} {
+			if !slices.Contains(call, want) {
+				t.Errorf("delete call = %v, missing %q", call, want)
+			}
+		}
+	})
+	t.Run("failure surfaces", func(t *testing.T) {
+		sbx, _ := testSandbox(t, response{exit: 1, stderr: "forbidden"})
+		if err := sbx.Destroy(context.Background()); err == nil || !strings.Contains(err.Error(), "forbidden") {
+			t.Errorf("Destroy: %v", err)
+		}
+		sbx, _ = testSandbox(t, response{err: errors.New("spawn failed")})
+		if err := sbx.Destroy(context.Background()); err == nil {
+			t.Error("runner error must surface")
+		}
+	})
+}
+
+func sweepJobJSON(name, ns, host, pid string) string {
+	return fmt.Sprintf(`{"metadata":{"name":%q,"namespace":%q,"labels":{"com.probavi.sandbox":"1","com.probavi.host":%q,"com.probavi.pid":%q}}}`,
+		name, ns, host, pid)
+}
+
+func TestSweepOrphans(t *testing.T) {
+	t.Run("removes only this host's dead-owner jobs", func(t *testing.T) {
+		p, fake := testProvider(t)
+		list := `{"items":[` + strings.Join([]string{
+			sweepJobJSON("other-host", "a", "ffffffffffffffff", strconv.Itoa(deadPID)),
+			sweepJobJSON("live", "a", p.hostID, strconv.Itoa(os.Getpid())),
+			sweepJobJSON("dead", "b", p.hostID, strconv.Itoa(deadPID)),
+			sweepJobJSON("mangled", "c", p.hostID, "not-a-pid"),
+		}, ",") + `]}`
+		fake.responses = []response{{stdout: list}, {}, {}}
+
+		removed, err := p.SweepOrphans(context.Background())
+		if err != nil {
+			t.Fatalf("SweepOrphans: %v", err)
+		}
+		if !slices.Equal(removed, []string{"b/dead", "c/mangled"}) {
+			t.Errorf("removed = %v, want the dead and mangled jobs of this host only", removed)
+		}
+		if !slices.Contains(fake.calls[0], "--all-namespaces") {
+			t.Errorf("list call = %v, want --all-namespaces", fake.calls[0])
+		}
+	})
+
+	t.Run("failures surface", func(t *testing.T) {
+		p, _ := testProvider(t, response{exit: 1, stderr: "forbidden: cannot list jobs"})
+		if _, err := p.SweepOrphans(context.Background()); err == nil || !strings.Contains(err.Error(), "forbidden") {
+			t.Errorf("list failure: %v", err)
+		}
+		p, _ = testProvider(t, response{err: errors.New("spawn failed")})
+		if _, err := p.SweepOrphans(context.Background()); err == nil {
+			t.Error("runner error must surface")
+		}
+		p, _ = testProvider(t, response{stdout: "not json"})
+		if _, err := p.SweepOrphans(context.Background()); err == nil || !strings.Contains(err.Error(), "parse") {
+			t.Errorf("parse failure: %v", err)
+		}
+		p, _ = testProvider(t,
+			response{stdout: `{"items":[` + sweepJobJSON("dead", "a", "abcd1234abcd1234", strconv.Itoa(deadPID)) + `]}`},
+			response{exit: 1, stderr: "forbidden: cannot delete"})
+		if _, err := p.SweepOrphans(context.Background()); err == nil || !strings.Contains(err.Error(), "sweep orphan a/dead") {
+			t.Errorf("delete failure: %v", err)
+		}
+	})
+}
