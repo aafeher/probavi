@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 
+	"github.com/aafeher/probavi/internal/adapter"
 	"github.com/aafeher/probavi/internal/evidence"
 )
 
@@ -39,6 +41,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runEvidence(args[1:], stdout, stderr)
 	case "adapter":
 		return runAdapter(args[1:], stdout, stderr)
+	case "version":
+		return runVersion(stdout)
 	default:
 		fmt.Fprintf(stderr, "probavi: unknown command %q\n\n", args[0])
 		usage(stderr)
@@ -204,6 +208,17 @@ func (s *stringList) Set(v string) error {
 	return nil
 }
 
+// runVersion prints the binary version and the contract versions this
+// build speaks. For a trust product the contracts matter as much as the
+// binary: an auditor's first question about a log is "written under which
+// schema", and an adapter author's is "against which protocol".
+func runVersion(stdout io.Writer) int {
+	fmt.Fprintf(stdout, "probavi %s %s/%s\n", version, runtime.GOOS, runtime.GOARCH)
+	fmt.Fprintf(stdout, "adapter protocol: %s\n", adapter.ProtocolVersion)
+	fmt.Fprintf(stdout, "evidence schema:  %s (verifies all published versions)\n", evidence.SchemaID)
+	return 0
+}
+
 func usage(w io.Writer) {
 	fmt.Fprint(w, `Usage: probavi <command> [arguments]
 
@@ -236,5 +251,9 @@ Commands:
       container runtime involved. A new adapter is done when this passes.
       Prints one line per check on stderr and a JSON report on stdout.
       Exit codes: 0 conformant, 1 one or more checks failed, 3 usage error.
+
+  version
+      Print the probavi version and the contract versions this build
+      speaks (adapter protocol, evidence schema).
 `)
 }
