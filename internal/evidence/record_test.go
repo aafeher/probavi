@@ -11,12 +11,17 @@ func i64Ptr(n int64) *int64   { return &n }
 
 func hexRef(pair string) string { return "sha256:" + strings.Repeat(pair, 32) }
 
-// sampleRecordPass is a fully populated passing record.
+// sampleRecordPass is a fully populated passing record (a PITR drill, so
+// the golden log covers drill.pitr_target with a value; the error sample
+// covers null).
 func sampleRecordPass() *Record {
 	return &Record{
 		Schema: SchemaID,
 		TS:     "2026-07-31T02:00:11.482Z",
-		Drill:  Drill{Name: "prod-orders-db", ConfigHash: hexRef("7d")},
+		Drill: Drill{
+			Name: "prod-orders-db", ConfigHash: hexRef("7d"),
+			PITRTarget: strPtr("2026-07-30T14:32:00.000Z"),
+		},
 		Backup: Backup{
 			Kind:      "pgdump",
 			Checksum:  strPtr(hexRef("9f")),
@@ -86,6 +91,8 @@ func TestValidateRejects(t *testing.T) {
 		{"second-precision ts", func(r *Record) { r.TS = "2026-07-31T02:00:11Z" }},
 		{"empty drill name", func(r *Record) { r.Drill.Name = "" }},
 		{"bad config hash", func(r *Record) { r.Drill.ConfigHash = "md5:abc" }},
+		{"bad pitr target", func(r *Record) { r.Drill.PITRTarget = strPtr("yesterday 14:32") }},
+		{"second-precision pitr target", func(r *Record) { r.Drill.PITRTarget = strPtr("2026-07-30T14:32:00Z") }},
 		{"unknown outcome", func(r *Record) { r.Outcome = "maybe" }},
 		{"pass with error", func(r *Record) { r.Error = &DrillError{Code: "x", Message: "y"} }},
 		{"fail without error", func(r *Record) { r.Outcome = OutcomeFail }},

@@ -1,12 +1,13 @@
-# Probavi Evidence Schema — v0
+# Probavi Evidence Schema — v1
 
-Status: **v0 — approved by the maintainer 2026-07-31. NORMATIVE.**
+Status: **v1 — approved by the maintainer 2026-08-01. NORMATIVE.**
 The evidence format is the product's core trust artifact; treat every field
 and byte here as a public API. Any change requires a schema version bump in
 this document before any code changes. The key words MUST, MUST NOT, SHOULD,
 and MAY are to be interpreted as described in RFC 2119.
 
-Schema identifier: `probavi-evidence/0`.
+Schema identifier: `probavi-evidence/1`. Writers emit v1; verifiers MUST
+also accept records declaring `probavi-evidence/0` (§10).
 
 ---
 
@@ -61,7 +62,8 @@ only:
   "ts": "2026-07-31T02:00:11.482Z",
   "drill": {
     "name": "prod-orders-db",
-    "config_hash": "sha256:7d865e959b2466918c9863afca942d0fb89d7c9ac0c99bafc3749504ded97730"
+    "config_hash": "sha256:7d865e959b2466918c9863afca942d0fb89d7c9ac0c99bafc3749504ded97730",
+    "pitr_target": null
   },
   "backup": {
     "kind": "pgdump",
@@ -109,6 +111,7 @@ Field reference:
 | `ts` | string | no | Record creation time, RFC 3339 UTC, exactly millisecond precision, `Z` suffix. |
 | `drill.name` | string | no | Drill identity from config. |
 | `drill.config_hash` | string | no | `sha256:` over the exact drill-config file bytes as read. Proves which config ran without embedding its contents. |
+| `drill.pitr_target` | string | yes | The resolved point-in-time recovery target the drill demanded of the adapter (RFC 3339 UTC, ms, `Z`). Null when the drill did not request PITR. The config may express the target relatively (e.g. "24h ago" — pinned by `config_hash`); this field records the absolute instant actually requested, which is what the record proves recoverability *to*. |
 | `backup.kind` | string | no | Source kind (adapter-defined, from config). |
 | `backup.checksum` | string | yes | `sha256:` over source bytes, from the adapter's `source_identity`. Null if provisioning never got that far. |
 | `backup.size_bytes` | integer | yes | Source size. |
@@ -298,7 +301,14 @@ garbage is detected and reported but forges nothing.
   version. Verifiers MUST support every published version.
 - Existing records are never rewritten to a new version.
 
-## 11. Remaining before v0 freeze
+Published versions and migration notes:
+
+| Version | Shape difference | Migration |
+|---------|------------------|-----------|
+| `probavi-evidence/0` | v1 without `drill.pitr_target`. | None — v0 records lack the field entirely (fixed shape per version) and remain valid forever under v0. Writers emit v1 from 2026-08-01. |
+| `probavi-evidence/1` | Current (§3). | — |
+
+## 11. Remaining before v1 freeze
 
 - [ ] Machine-readable JSON Schema (`docs/schemas/evidence/record.json`),
       verified in CI against the golden-file tests.
@@ -307,6 +317,12 @@ garbage is detected and reported but forges nothing.
 
 ## Changelog
 
+- v1 (2026-08-01): added `drill.pitr_target` — nullable, the resolved
+  absolute point-in-time recovery target of PITR drills. Rationale: a PITR
+  drill's compliance claim is "restorable *to instant T*"; without T in the
+  signed record the claim would rest on unsigned logs. Approved by the
+  maintainer 2026-08-01. No other shape or byte-level change; v0 records
+  remain valid under v0 (§10).
 - v0 (2026-07-31): initial complete draft. Canonicalization decided:
   RFC 8785 JCS restricted to integer-only numbers (maintainer decision
   2026-07-31). Per-phase integer-millisecond timings aligned with adapter

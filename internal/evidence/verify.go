@@ -111,7 +111,7 @@ func walk(r io.Reader, keyring Keyring) (*walkState, error) {
 // step processes one complete line; it reports false when walking must stop
 // because the chain is invalid.
 func (w *walkState) step(line []byte, lineNo int) bool {
-	rec, verdict := w.parseCanonical(line, lineNo)
+	rec, obj, verdict := w.parseCanonical(line, lineNo)
 	if rec == nil {
 		return verdict
 	}
@@ -122,7 +122,7 @@ func (w *walkState) step(line []byte, lineNo int) bool {
 		return w.invalid(lineNo, fmt.Sprintf("prev_hash mismatch, want %s", w.prevHash))
 	}
 	if w.keyring != nil {
-		if err := w.verifySignature(rec); err != nil {
+		if err := w.verifySignature(rec, obj); err != nil {
 			return w.invalid(lineNo, err.Error())
 		}
 	}
@@ -133,34 +133,44 @@ func (w *walkState) step(line []byte, lineNo int) bool {
 }
 
 // parseCanonical classifies a line: damage (nil record, keep walking),
-// invalid (nil record, stop), or a parsed record in canonical form.
-func (w *walkState) parseCanonical(line []byte, lineNo int) (*Record, bool) {
+// invalid (nil record, stop), or a parsed record in canonical form, returned
+// both as a struct and as the decoded generic object.
+func (w *walkState) parseCanonical(line []byte, lineNo int) (*Record, map[string]any, bool) {
 	if len(line) > MaxRecordBytes {
-		return nil, w.invalid(lineNo, ErrRecordTooLarge.Error())
+		return nil, nil, w.invalid(lineNo, ErrRecordTooLarge.Error())
 	}
 	v, err := decodeStrict(line)
 	if err != nil {
 		w.damaged = append(w.damaged, lineNo)
-		return nil, true
+		return nil, nil, true
 	}
 	canonical, err := Canonicalize(v)
 	if err != nil {
-		return nil, w.invalid(lineNo, err.Error())
+		return nil, nil, w.invalid(lineNo, err.Error())
 	}
 	if !bytes.Equal(canonical, line) {
-		return nil, w.invalid(lineNo, ErrNotCanonical.Error())
+		return nil, nil, w.invalid(lineNo, ErrNotCanonical.Error())
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, nil, w.invalid(lineNo, "decode record: not a JSON object")
 	}
 	var rec Record
 	if err := json.Unmarshal(line, &rec); err != nil {
-		return nil, w.invalid(lineNo, fmt.Sprintf("decode record: %v", err))
+		return nil, nil, w.invalid(lineNo, fmt.Sprintf("decode record: %v", err))
 	}
-	if rec.Schema != SchemaID {
-		return nil, w.invalid(lineNo, fmt.Sprintf("unsupported schema %q", rec.Schema))
+	if !supportedSchema(rec.Schema) {
+		return nil, nil, w.invalid(lineNo, fmt.Sprintf("unsupported schema %q", rec.Schema))
 	}
-	return &rec, true
+	return &rec, obj, true
 }
 
-func (w *walkState) verifySignature(rec *Record) error {
+// verifySignature checks rec's signature. The signed message is rebuilt from
+// the stored object itself — drop sig, re-canonicalize — never from the
+// Record struct: a struct round-trip would impose the current schema
+// version's shape on stored records of every version (e.g. inject a v1-only
+// field as null into a v0 record and falsely fail its signature).
+func (w *walkState) verifySignature(rec *Record, obj map[string]any) error {
 	if rec.Sig == nil {
 		return errors.New("record has no sig")
 	}
@@ -175,9 +185,8 @@ func (w *walkState) verifySignature(rec *Record) error {
 	if err != nil || len(sig) != ed25519.SignatureSize {
 		return errors.New("malformed sig.sig_b64")
 	}
-	unsigned := *rec
-	unsigned.Sig = nil
-	message, err := CanonicalizeRecord(&unsigned)
+	delete(obj, "sig")
+	message, err := Canonicalize(obj)
 	if err != nil {
 		return fmt.Errorf("rebuild signed bytes: %w", err)
 	}
