@@ -13,6 +13,15 @@ always called out explicitly.
 
 ### Added
 
+- MongoDB adapter (`adapters/mongodb`, `probavi-adapter-mongodb`):
+  restores `mongodump --archive` backups — plain or `--gzip`, the
+  compression sniffed from the artifact bytes — with
+  `mongorestore --stopOnError`, so partial restores fail loudly. Source
+  kinds: `mongodump` (one archive file) and `mongodump_dir` (newest file
+  in a directory). Checks are mongosh `--eval` expressions carried by the
+  declared sql_runner template; the core stays engine-free, and the
+  adapter passes all 15 conformance checks. Third engine, zero core
+  changes.
 - `remotehost` sandbox provider: restore drills on dedicated hosts that
   cannot run any container runtime, over plain SSH + systemd
   (`docs/sandbox-bare-host.md`). One sandbox is one transient systemd
