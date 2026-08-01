@@ -234,6 +234,7 @@ func TestAdapterProbeGoldensValidate(t *testing.T) {
 	for _, golden := range []string{
 		"../../adapters/postgres/testdata/probe_response.golden",
 		"../../adapters/mysql/testdata/probe_response.golden",
+		"../../adapters/mongodb/testdata/probe_response.golden",
 	} {
 		doc := parseJSON(t, goldenLines(t, golden)[0])
 		if err := response.Validate(doc); err != nil {

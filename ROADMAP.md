@@ -59,7 +59,8 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
 
 ## Phase 4 — Ecosystem
 
-- [ ] MongoDB adapter; SQL Server adapter (community-driven if possible).
+- [x] MongoDB adapter. **Complete 2026-08-01 (`adapters/mongodb`): `mongodump --archive` restores (plain and gzip, compression sniffed from the bytes) via `mongorestore --stopOnError`, plus the newest-in-directory kind; the no-SQL dialect is absorbed by the declared sql_runner template (`mongosh --eval`), zero core changes; conformance 15/15; both archive forms proven end to end against real Docker.**
+- [ ] SQL Server adapter (community-driven if possible).
 - [x] Bare-host SSH sandbox provider (no container runtime on the target). Spec first: it must answer how isolation, engine/tool version matching, ephemeral storage, and guaranteed cleanup survive without containers before any code — the current answer for remote drills is the docker provider over `DOCKER_HOST=ssh://…`. **Design spec approved 2026-08-01 (`docs/sandbox-bare-host.md`, transient systemd slice + per-drill workspace over the ssh CLI) with the §8 decisions: provider name `remotehost`, polkit privilege model, unix-socket-first, systemd ≥ 244. Implemented 2026-08-01 (`internal/sandbox/remotehost`): version probe at first contact, payloads as transient units in the slice as the drill user, host-scoped marker-based orphan sweep, target-side deadline-timer backstop; CI exercises the full lifecycle over loopback ssh with the shipped polkit rule.**
 - [ ] DR game-day orchestration: multi-database, dependency-ordered restore drills.
 - [ ] Notification integrations (webhook first; Slack/email via webhook recipes).
