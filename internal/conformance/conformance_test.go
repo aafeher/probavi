@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +19,24 @@ import (
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("PROBAVI_FAKE_ADAPTER"); mode != "" {
 		os.Exit(fakeMain(mode))
+	}
+	// The race detector sleeps atexit_sleep_ms (default 1000) at every
+	// process exit to widen the window for catching late races from
+	// still-running goroutines. This suite spawns hundreds of short-lived
+	// fake-adapter children (this binary, re-executed), and each child
+	// inheriting the default turns ~400×1s of pure sleeping into the
+	// package's entire runtime. Disabling the exit sleep does not weaken
+	// race detection of memory accesses in any way — it only narrows the
+	// at-exit observation window, which buys nothing for a ~10 ms child.
+	// Any operator-provided GORACE options are preserved; ours wins on
+	// conflict by coming last.
+	gorace := "atexit_sleep_ms=0"
+	if prev := os.Getenv("GORACE"); prev != "" {
+		gorace = prev + " " + gorace
+	}
+	if err := os.Setenv("GORACE", gorace); err != nil {
+		fmt.Fprintf(os.Stderr, "set GORACE: %v\n", err)
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
