@@ -299,6 +299,35 @@ func TestSQLCheck(t *testing.T) {
 	})
 }
 
+func TestQueryVerdictsAndInfraAborts(t *testing.T) {
+	t.Run("row_count query failure is a verdict", func(t *testing.T) {
+		res := runSingle(t, config.Check{Builtin: "row_count", Table: "orders", Min: i64(1)},
+			&fakeExec{t: t, respond: queryFailure("ERROR: disk on fire")})
+		if res.OK || !strings.Contains(res.Detail, "count query failed") {
+			t.Errorf("result = %+v", res)
+		}
+	})
+	t.Run("freshness query failure is a verdict", func(t *testing.T) {
+		res := runSingle(t, config.Check{Builtin: "freshness", Table: "orders", Column: "created_at",
+			MaxAge: config.Duration(time.Hour)}, &fakeExec{t: t, respond: queryFailure("ERROR: nope")})
+		if res.OK || !strings.Contains(res.Detail, "freshness query failed") {
+			t.Errorf("result = %+v", res)
+		}
+	})
+	t.Run("infrastructure failure aborts every table builtin", func(t *testing.T) {
+		for _, c := range []config.Check{
+			{Builtin: "table_exists", Table: "t"},
+			{Builtin: "row_count", Table: "t", Min: i64(1)},
+			{Builtin: "freshness", Table: "t", Column: "c", MaxAge: config.Duration(time.Hour)},
+		} {
+			exec := &fakeExec{t: t, err: errors.New("sandbox died")}
+			if _, err := Run(context.Background(), []config.Check{c}, testDeps(exec)); err == nil {
+				t.Errorf("check %+v must abort on infrastructure failure", c)
+			}
+		}
+	})
+}
+
 func TestRunAbortsOnInfrastructureFailure(t *testing.T) {
 	list := []config.Check{
 		{Builtin: "row_count", Table: "orders", Min: i64(1)},

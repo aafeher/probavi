@@ -400,6 +400,12 @@ func TestRunWithoutPITRRecordsNull(t *testing.T) {
 	}
 }
 
+func TestSupportsPITRUnknownKind(t *testing.T) {
+	if supportsPITR(testProbe(), "kind-nobody-declared") {
+		t.Error("a kind absent from probe.sources must not claim the pitr capability")
+	}
+}
+
 func TestRunTimeoutClassification(t *testing.T) {
 	fa := &fakeAdapter{probe: testProbe(),
 		provErr: &adapter.Error{Code: "adapter_crash", Message: "killed"}}

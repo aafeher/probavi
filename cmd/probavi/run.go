@@ -10,11 +10,15 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/aafeher/probavi/internal/adapter"
 	"github.com/aafeher/probavi/internal/config"
+	"github.com/aafeher/probavi/internal/conformance"
 	"github.com/aafeher/probavi/internal/core"
 	"github.com/aafeher/probavi/internal/evidence"
 	"github.com/aafeher/probavi/internal/metrics"
@@ -212,6 +216,80 @@ func (k k8sProvider) Create(ctx context.Context, params map[string]string) (core
 
 func (k k8sProvider) SweepOrphans(ctx context.Context) ([]string, error) {
 	return k.p.SweepOrphans(ctx)
+}
+
+// runAdapterConformance implements `probavi adapter conformance`: run the
+// frozen §10 check list against an adapter and report the verdicts.
+func runAdapterConformance(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("adapter conformance", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	kind := fs.String("source-kind", "", "source kind for the provision checks (default: the first kind the probe declares)")
+	var params stringList
+	fs.Var(&params, "source-param", "source parameter as k=v for the provision checks; repeatable")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() != 1 || fs.Arg(0) == "" {
+		fmt.Fprintln(stderr, "probavi adapter conformance: exactly one adapter name or executable path is required")
+		return exitUsage
+	}
+	sourceParams := map[string]string{}
+	for _, p := range params {
+		k, v, ok := strings.Cut(p, "=")
+		if !ok || k == "" {
+			fmt.Fprintf(stderr, "probavi adapter conformance: --source-param %q is not k=v\n", p)
+			return exitUsage
+		}
+		sourceParams[k] = v
+	}
+	path, err := resolveAdapterExecutable(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(stderr, "probavi adapter conformance: %v\n", err)
+		return exitUsage
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	report, err := conformance.Run(ctx, path, conformance.Options{SourceKind: *kind, SourceParams: sourceParams})
+	if err != nil {
+		fmt.Fprintf(stderr, "probavi adapter conformance: %v\n", err)
+		return exitError
+	}
+	for _, c := range report.Checks {
+		if c.OK {
+			fmt.Fprintf(stderr, "ok   %s\n", c.Name)
+		} else {
+			fmt.Fprintf(stderr, "FAIL %s: %s\n", c.Name, c.Detail)
+		}
+	}
+	if err := json.NewEncoder(stdout).Encode(report); err != nil {
+		fmt.Fprintf(stderr, "probavi adapter conformance: encode report: %v\n", err)
+		return exitError
+	}
+	if report.Failed > 0 {
+		return exitFail
+	}
+	return exitPass
+}
+
+// resolveAdapterExecutable accepts an adapter name (resolved to
+// probavi-adapter-<name> on PATH, §2.1) or an explicit executable path.
+func resolveAdapterExecutable(arg string) (string, error) {
+	if strings.ContainsRune(arg, os.PathSeparator) {
+		path, err := exec.LookPath(arg)
+		if err != nil {
+			return "", fmt.Errorf("adapter executable %q: %w", arg, err)
+		}
+		return path, nil
+	}
+	path, err := exec.LookPath("probavi-adapter-" + arg)
+	if err != nil {
+		return "", fmt.Errorf("resolve adapter %q: %w", arg, err)
+	}
+	return path, nil
 }
 
 // runAdapterProbe implements `probavi adapter probe <name>`: resolve the

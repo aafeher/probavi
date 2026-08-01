@@ -17,9 +17,10 @@ const (
 
 // protoError is the §5 error object an adapter sends in a final response.
 type protoError struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	Retryable bool   `json:"retryable"`
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	Retryable bool           `json:"retryable"`
+	Detail    map[string]any `json:"detail,omitempty"`
 }
 
 func protoErr(code string, retryable bool, format string, a ...any) *protoError {
@@ -64,8 +65,10 @@ func accept(stdin io.Reader, stdout io.Writer) (*core, *inbound, *protoError) {
 	}
 	c := &core{in: sc, out: stdout, requestID: req.RequestID}
 	if req.Protocol != protocolVersion {
+		// §3.1: the spoken versions MUST be listed in detail.supported.
 		return c, nil, &protoError{Code: "unsupported_protocol",
-			Message: "this adapter speaks " + protocolVersion + " only"}
+			Message: "this adapter speaks " + protocolVersion + " only",
+			Detail:  map[string]any{"supported": []string{protocolVersion}}}
 	}
 	return c, req, nil
 }

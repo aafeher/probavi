@@ -175,6 +175,10 @@ func TestRejectsWrongProtocolAndOp(t *testing.T) {
 		if exit != 0 || f.OK || f.Error.Code != "unsupported_protocol" {
 			t.Errorf("exit=%d final=%+v", exit, f)
 		}
+		supported, ok := f.Error.Detail["supported"].([]any)
+		if !ok || len(supported) == 0 || supported[0] != "probavi-adapter/0" {
+			t.Errorf("detail.supported = %v, want the spoken versions (§3.1)", f.Error.Detail)
+		}
 	})
 	t.Run("unknown op", func(t *testing.T) {
 		line, _, exit := driveOp(t, "backup", "{}", nil)

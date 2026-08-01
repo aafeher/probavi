@@ -47,11 +47,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 func runAdapter(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "probe" {
+	if len(args) == 0 {
 		usage(stderr)
 		return exitUsage
 	}
-	return runAdapterProbe(args[1:], stdout, stderr)
+	switch args[0] {
+	case "probe":
+		return runAdapterProbe(args[1:], stdout, stderr)
+	case "conformance":
+		return runAdapterConformance(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintf(stderr, "probavi adapter: unknown subcommand %q\n\n", args[0])
+		usage(stderr)
+		return exitUsage
+	}
 }
 
 func runEvidence(args []string, stdout, stderr io.Writer) int {
@@ -220,5 +229,12 @@ Commands:
 
   adapter probe <name>
       Resolve probavi-adapter-<name> and print its capabilities as JSON.
+
+  adapter conformance [--source-kind <kind>] [--source-param k=v ...] <name-or-path>
+      Drive the adapter through the frozen protocol conformance checks
+      (docs/adapter-protocol.md §10) against a simulated sandbox — no
+      container runtime involved. A new adapter is done when this passes.
+      Prints one line per check on stderr and a JSON report on stdout.
+      Exit codes: 0 conformant, 1 one or more checks failed, 3 usage error.
 `)
 }

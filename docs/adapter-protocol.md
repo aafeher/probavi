@@ -493,21 +493,47 @@ esac
 
 ## 10. Conformance
 
-`probavi adapter conformance <cmd>` (ROADMAP Phase 2) will assert, per
-operation: framing discipline (single-line JSON, `request_id` echo, nothing
-after the final response, no stdout pollution), the error registry mapping
-for missing/corrupt sources, teardown idempotence including the empty-state
-crash case, SIGTERM handling within grace, and that reported timings are
-plausible measurements. A new adapter is "done" only when conformance
-passes.
+`probavi adapter conformance <name-or-path>` drives the adapter exactly as
+the core would — a fresh process per operation — against a **simulated
+sandbox**: every `exec` succeeds (exit 0, stdout `1`, empty stderr), every
+`put_file` succeeds. No container runtime is involved. A new adapter is
+"done" only when every check passes.
+
+The check list below is **frozen for protocol v0**; adding, removing, or
+changing a check is a protocol change (this section, then code). Checks:
+
+| # | Check | Asserts |
+|---|-------|---------|
+| 1 | `probe.shape` | Well-formed §6.1 payload: `name` matches `^[a-z0-9][a-z0-9-]*$`, `protocol_versions` contains `probavi-adapter/0`, at least one source kind, `verbs_required` ⊆ {`exec`, `put_file`}. |
+| 2 | `probe.sql_runner` | `argv` contains `{{sql}}` as its own element; `{{password}}` appears only in `env` values (§6.1). |
+| 3 | `probe.no_sandbox_calls` | Probe issues no sandbox calls (§6.1). |
+| 4 | `handshake.unsupported_protocol` | A request with protocol `probavi-adapter/999` yields `unsupported_protocol` with `detail.supported` listing the spoken versions (§3.1). |
+| 5 | `handshake.unknown_op` | An unknown `op` yields `invalid_request`. |
+| 6 | `provision.malformed_payload` | A non-object provision payload yields `invalid_request`, never a crash. |
+| 7 | `provision.unsupported_source` | A source kind the adapter never declared yields `unsupported_source` (§5). |
+| 8 | `provision.missing_source` | A declared kind with a nonexistent path yields `source_not_found` (§5). |
+| 9 | `provision.happy_path` | With a generated source file and the simulated sandbox: `ok` response; `source_identity.checksum` matches `^sha256:[0-9a-f]{64}$`; `connection.scheme` nonempty; `state` is an object; `created_at` is null or RFC 3339 (§6.2). |
+| 10 | `provision.timings` | Every reported timing ≥ 0 and their sum does not exceed the operation's wall-clock time as observed by the harness (§7 — measured, not estimated). |
+| 11 | `healthcheck.shape` | Well-formed §6.3 payload with `latency_seconds` ≥ 0; the `healthy` verdict itself is not asserted. |
+| 12 | `teardown.empty_state` | Teardown with `state: {}` succeeds — the §6.4 crash case. |
+| 13 | `teardown.idempotent` | An immediate second teardown with the same state succeeds. |
+| 14 | `sigterm.cancels` | SIGTERM delivered while provision waits on an outstanding sandbox call: after the call is answered, the adapter issues no further sandbox calls, exits within the grace period, and its final response — if the operation did not complete — carries code `cancelled` (§2.4). |
+| 15 | `framing.discipline` | Aggregated over every operation driven: each stdout line is one well-formed protocol message within the 4 MiB frame limit, `request_id` is echoed on every message, exactly one final response is sent, and nothing follows it (§2.2, §3). |
+
+Checks 8–10 run against the source kind selected with `--source-kind`
+(default: the first kind the probe declares) plus any `--source-param
+k=v` repetitions. Kinds whose provision demands an idle engine (physical
+restores) conflict with the simulated sandbox's always-succeeding `exec`;
+run conformance against a logical kind — the protocol-discipline checks
+cover the operations, not every engine flow.
 
 ## 11. Remaining before v0 freeze
 
 - [ ] Machine-readable JSON Schemas for all message and payload shapes
       (`docs/schemas/adapter/*.json`), generated from this document and
       verified in CI against the golden-file tests.
-- [ ] Conformance suite: exact test list frozen alongside the Phase 2
-      implementation.
+- [x] Conformance suite: exact test list frozen alongside the Phase 2
+      implementation (§10, 2026-08-01).
 
 ## Changelog
 
@@ -517,3 +543,6 @@ passes.
   Reviewed and approved by the maintainer 2026-07-31; normative from this
   date. Editorial (no wire change): §7 evidence field references aligned
   with the evidence schema's `timings_ms` integer-millisecond naming.
+  2026-08-01 (no wire change): §10 conformance check list frozen alongside
+  the `probavi adapter conformance` implementation, closing the second §11
+  item.

@@ -184,6 +184,12 @@ func TestUsageErrors(t *testing.T) {
 		{"keygen without out", []string{"evidence", "keygen"}},
 		{"keygen bad flag", []string{"evidence", "keygen", "--no-such-flag"}},
 		{"keygen uncreatable path", []string{"evidence", "keygen", "--out", filepath.Join(missing, "sub", "k")}},
+		{"adapter without subcommand", []string{"adapter"}},
+		{"adapter unknown subcommand", []string{"adapter", "fuzz"}},
+		{"conformance without adapter", []string{"adapter", "conformance"}},
+		{"conformance bad source-param", []string{"adapter", "conformance", "--source-param", "novalue", "x"}},
+		{"conformance unresolvable adapter", []string{"adapter", "conformance", "no-such-adapter-installed"}},
+		{"conformance bad flag", []string{"adapter", "conformance", "--no-such-flag", "x"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
