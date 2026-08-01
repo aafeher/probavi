@@ -102,3 +102,12 @@ func TestWriteTextfileEdges(t *testing.T) {
 		t.Error("unwritable path must be an error")
 	}
 }
+
+func TestWriteTextfilePublishFailure(t *testing.T) {
+	// The tempfile write succeeds, but renaming onto an existing directory
+	// cannot: the atomic-publish step must surface its own error.
+	dir := t.TempDir()
+	if err := WriteTextfile(dir, sampleRecord(evidence.OutcomePass)); err == nil {
+		t.Error("renaming over a directory must fail loudly")
+	}
+}

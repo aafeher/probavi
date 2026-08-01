@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -108,6 +109,7 @@ func TestViolationsAreDetected(t *testing.T) {
 		{"teardown-empty-fails", "teardown.empty_state", "crash case", Options{}},
 		{"teardown-third-fails", "teardown.idempotent", "both succeed", Options{}},
 		{"ignore-sigterm", "sigterm.cancels", "after SIGTERM", Options{}},
+		{"sigterm-wrong-code", "sigterm.cancels", "want cancelled", Options{}},
 		{"hang-on-sigterm", "sigterm.cancels", "grace", Options{Grace: 700 * time.Millisecond}},
 	}
 	for _, tt := range tests {
@@ -207,6 +209,37 @@ func TestRunUnstartableAdapter(t *testing.T) {
 	_, err := Run(context.Background(), "/nonexistent/probavi-adapter-void", Options{})
 	if err == nil {
 		t.Fatal("Run must report an unstartable adapter as a harness error, not a verdict")
+	}
+}
+
+func TestAdapterVanishingMidSuiteIsAHarnessError(t *testing.T) {
+	t.Setenv("PROBAVI_FAKE_ADAPTER", "self-destruct")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable: %v", err)
+	}
+	raw, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatalf("read self: %v", err)
+	}
+	copyPath := filepath.Join(t.TempDir(), "adapter-copy")
+	if err := os.WriteFile(copyPath, raw, 0o755); err != nil {
+		t.Fatalf("write copy: %v", err)
+	}
+	if _, err := Run(context.Background(), copyPath, Options{}); err == nil {
+		t.Fatal("an adapter that vanishes mid-suite must surface as a harness error")
+	}
+}
+
+func TestRunTempSourceFailure(t *testing.T) {
+	t.Setenv("PROBAVI_FAKE_ADAPTER", "conformant")
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "gone"))
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable: %v", err)
+	}
+	if _, err := Run(context.Background(), self, Options{}); err == nil {
+		t.Fatal("an uncreatable temp source is a harness error, not an adapter verdict")
 	}
 }
 

@@ -268,6 +268,22 @@ func TestCreateFailures(t *testing.T) {
 		}
 	})
 
+}
+
+func TestCreateAwaitQueryFailures(t *testing.T) {
+	params := map[string]string{"image": "x:1"}
+
+	t.Run("pod query fails", func(t *testing.T) {
+		p, _ := testProvider(t,
+			response{stdout: "job.batch/created"},
+			response{exit: 1, stderr: "Error from server (Forbidden): pods is forbidden"},
+			response{}, // delete during cleanup
+		)
+		if _, err := p.Create(context.Background(), params); err == nil || !strings.Contains(err.Error(), "kubectl get pods exited") {
+			t.Errorf("Create: %v, want the kubectl failure surfaced", err)
+		}
+	})
+
 	t.Run("pod list is not JSON", func(t *testing.T) {
 		p, _ := testProvider(t,
 			response{stdout: "job.batch/created"},
@@ -278,6 +294,15 @@ func TestCreateFailures(t *testing.T) {
 			t.Errorf("Create: %v, want parse error", err)
 		}
 	})
+}
+
+func TestFirstLine(t *testing.T) {
+	if got := firstLine([]byte("  first\nsecond")); got != "first" {
+		t.Errorf("firstLine = %q", got)
+	}
+	if got := firstLine([]byte("only")); got != "only" {
+		t.Errorf("firstLine = %q", got)
+	}
 }
 
 func testSandbox(t *testing.T, responses ...response) (*Sandbox, *fakeRunner) {

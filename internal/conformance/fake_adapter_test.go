@@ -87,6 +87,28 @@ func (f *fakeAdapter) probe() int {
 	case "probe-sandbox-call":
 		f.call("exec", map[string]any{"argv": []string{"true"}})
 	}
+	if f.mode == "bare-message" {
+		f.write(map[string]any{"protocol": protocolVersion, "request_id": f.rid})
+	}
+	code := f.finalOK(f.probePayload())
+	if f.mode == "double-final" {
+		f.finalOK(map[string]any{"name": "fake-again"})
+	}
+	if f.mode == "self-destruct" {
+		// The probe op itself succeeds; every later operation finds no
+		// executable — the mid-suite harness-error path.
+		if exe, err := os.Executable(); err == nil {
+			if err := os.Remove(exe); err != nil {
+				return 1
+			}
+		}
+	}
+	return code
+}
+
+// probePayload shapes the §6.1 payload, bending one field per violation
+// mode.
+func (f *fakeAdapter) probePayload() map[string]any {
 	name, versions := "fake", []string{protocolVersion}
 	sources := []map[string]any{{"kind": "fakedump", "capabilities": map[string]bool{"pitr": false}}}
 	verbs := []string{"exec"}
@@ -106,10 +128,8 @@ func (f *fakeAdapter) probe() int {
 		sources = []map[string]any{{"kind": ""}}
 	case "bad-verb":
 		verbs = []string{"teleport"}
-	case "bare-message":
-		f.write(map[string]any{"protocol": protocolVersion, "request_id": f.rid})
 	}
-	code := f.finalOK(map[string]any{
+	return map[string]any{
 		"name":              name,
 		"adapter_version":   "0.0.1",
 		"protocol_versions": versions,
@@ -117,11 +137,7 @@ func (f *fakeAdapter) probe() int {
 		"sources":           sources,
 		"sql_runner":        map[string]any{"argv": argv, "env": map[string]string{}},
 		"verbs_required":    verbs,
-	})
-	if f.mode == "double-final" {
-		f.finalOK(map[string]any{"name": "fake-again"})
 	}
-	return code
 }
 
 func (f *fakeAdapter) provision(payload json.RawMessage) int {
@@ -152,7 +168,7 @@ func (f *fakeAdapter) provision(payload json.RawMessage) int {
 		f.call("exec", map[string]any{"argv": []string{"fake_isready"}}) // readiness
 	}
 	if f.cancelled() {
-		return f.finalError("cancelled", nil)
+		return f.finalError(f.cancelCode(), nil)
 	}
 	if f.mode == "weird-verb" {
 		// The simulated sandbox must answer an undefined verb with an
@@ -163,7 +179,7 @@ func (f *fakeAdapter) provision(payload json.RawMessage) int {
 		f.call("exec", map[string]any{"argv": []string{"fake_restore"}}) // restore
 	}
 	if f.cancelled() {
-		return f.finalError("cancelled", nil)
+		return f.finalError(f.cancelCode(), nil)
 	}
 
 	return f.finalOK(f.provisionResponse(raw))
@@ -246,6 +262,15 @@ func bumpCounter(path string) int {
 	n, _ := strconv.Atoi(string(raw))                        //nolint:errcheck // empty parses as 0
 	_ = os.WriteFile(path, []byte(strconv.Itoa(n+1)), 0o600) //nolint:errcheck // test fixture
 	return n + 1
+}
+
+// cancelCode is "cancelled" per §2.4; the sigterm-wrong-code mode
+// misreports the abandonment as an internal error.
+func (f *fakeAdapter) cancelCode() string {
+	if f.mode == "sigterm-wrong-code" {
+		return "internal"
+	}
+	return "cancelled"
 }
 
 // cancelled reports (without blocking) whether SIGTERM arrived. The
