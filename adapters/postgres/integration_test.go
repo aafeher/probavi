@@ -199,6 +199,65 @@ func TestPgBackRestEndToEnd(t *testing.T) {
 	if err != nil || !health.Healthy {
 		t.Fatalf("healthcheck = %+v err=%v", health, err)
 	}
+	// 700 = 500 from the base backup + 200 replayed from the WAL archive:
+	// end-of-WAL recovery must include the post-backup batch.
+	out, err := sbx.Exec(ctx, sandbox.ExecRequest{Argv: []string{
+		"psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres", "-tA", "-c",
+		"SELECT count(*) FROM orders"}})
+	if err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if count := strings.TrimSpace(string(out.Stdout)); out.ExitCode != 0 || count != "700" {
+		t.Fatalf("row count = %q (exit %d, stderr %s), want 700", count, out.ExitCode, out.Stderr)
+	}
+	if _, err := runner.Teardown(ctx, res.State, "completed", sbx); err != nil {
+		t.Fatalf("teardown: %v", err)
+	}
+}
+
+// TestPgBackRestPITREndToEnd proves point-in-time recovery through the full
+// stack: the drill demands the instant captured between the two seed
+// batches, so the restored database must contain the first batch only —
+// even though the second batch's WAL sits in the archive — and must come up
+// promoted (writable), not paused in recovery.
+func TestPgBackRestPITREndToEnd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	image := buildPgBackRestImage(t, ctx)
+
+	binDir := t.TempDir()
+	if out, err := exec.CommandContext(ctx, "go", "build", "-o",
+		filepath.Join(binDir, "probavi-adapter-postgres"), ".").CombinedOutput(); err != nil {
+		t.Fatalf("build adapter: %v: %s", err, out)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	hostRepo := filepath.Join(t.TempDir(), "repo")
+	target := makeBackRestRepo(t, ctx, image, hostRepo)
+
+	provider := docker.New(nil)
+	sbx, err := provider.Create(ctx, map[string]string{"image": image, "command": "sleep infinity"})
+	if err != nil {
+		t.Fatalf("create idle sandbox: %v", err)
+	}
+	defer destroy(t, sbx)
+
+	runner, err := adapter.New("postgres", nil, nil)
+	if err != nil {
+		t.Fatalf("resolve adapter: %v", err)
+	}
+	res, err := runner.Provision(ctx, &adapter.ProvisionRequest{
+		Source: adapter.ProvisionSource{
+			Kind: "pgbackrest", Path: hostRepo, Params: map[string]string{"stanza": "demo"},
+		},
+		Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
+		PITR:    &adapter.PITR{TargetTime: target},
+	}, sbx)
+	if err != nil {
+		t.Fatalf("provision with pitr target %q: %v", target, err)
+	}
+
 	out, err := sbx.Exec(ctx, sandbox.ExecRequest{Argv: []string{
 		"psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres", "-tA", "-c",
 		"SELECT count(*) FROM orders"}})
@@ -206,8 +265,22 @@ func TestPgBackRestEndToEnd(t *testing.T) {
 		t.Fatalf("count query: %v", err)
 	}
 	if count := strings.TrimSpace(string(out.Stdout)); out.ExitCode != 0 || count != "500" {
-		t.Fatalf("row count = %q (exit %d, stderr %s), want 500", count, out.ExitCode, out.Stderr)
+		t.Fatalf("row count = %q (exit %d, stderr %s), want 500 — recovery must stop at %s, before the second batch",
+			count, out.ExitCode, out.Stderr, target)
 	}
+
+	// Writable proves --target-action=promote took effect and the adapter
+	// waited recovery out; a paused standby would fail this INSERT.
+	out, err = sbx.Exec(ctx, sandbox.ExecRequest{Argv: []string{
+		"psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c",
+		"INSERT INTO orders (total) VALUES (1.00)"}})
+	if err != nil {
+		t.Fatalf("write probe: %v", err)
+	}
+	if out.ExitCode != 0 {
+		t.Fatalf("restored instance is not writable (exit %d, stderr %s) — recovery did not promote", out.ExitCode, out.Stderr)
+	}
+
 	if _, err := runner.Teardown(ctx, res.State, "completed", sbx); err != nil {
 		t.Fatalf("teardown: %v", err)
 	}
@@ -232,9 +305,12 @@ func buildPgBackRestImage(t *testing.T, ctx context.Context) string {
 }
 
 // makeBackRestRepo seeds a real cluster in an idle container, configures
-// WAL archiving into a filesystem repo, takes a full backup, and copies the
-// repo to the host.
-func makeBackRestRepo(t *testing.T, ctx context.Context, image, dest string) {
+// WAL archiving into a filesystem repo, takes a full backup of the first
+// 500 orders, captures a pitr target instant, commits 200 more orders whose
+// WAL lands in the archive only, and copies the repo to the host. It
+// returns the captured target (RFC 3339): recovery to it must see exactly
+// 500 rows; recovery to end of WAL must see 700.
+func makeBackRestRepo(t *testing.T, ctx context.Context, image, dest string) string {
 	t.Helper()
 	// The owner-pid label carries the REAL test process: a concurrent
 	// sweep must spare the live seed; if this process dies, the next
@@ -248,6 +324,8 @@ func makeBackRestRepo(t *testing.T, ctx context.Context, image, dest string) {
 	id := strings.TrimSpace(string(out))
 	defer exec.Command("docker", "rm", "-f", "-v", id).Run() //nolint:errcheck // best-effort cleanup
 
+	// The sleeps bracket the captured instant so the two batches' commit
+	// timestamps land strictly on opposite sides of it.
 	seedScript := `set -e
 mkdir -p /tmp/repo /etc/pgbackrest
 printf '[global]\nrepo1-path=/tmp/repo\n\n[demo]\npg1-path=/var/lib/postgresql/data\n' > /etc/pgbackrest/pgbackrest.conf
@@ -258,13 +336,23 @@ gosu postgres pg_ctl -D /var/lib/postgresql/data -w -l /tmp/pg.log start
 gosu postgres psql -v ON_ERROR_STOP=1 -c "CREATE TABLE orders (id bigserial PRIMARY KEY, total numeric(10,2)); INSERT INTO orders (total) SELECT (random()*100)::numeric(10,2) FROM generate_series(1,500);"
 gosu postgres pgbackrest --stanza=demo stanza-create
 gosu postgres pgbackrest --stanza=demo --type=full backup
+sleep 1
+gosu postgres psql -tA -c "SELECT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')" > /tmp/pitr-target
+sleep 1
+gosu postgres psql -v ON_ERROR_STOP=1 -c "INSERT INTO orders (total) SELECT (random()*100)::numeric(10,2) FROM generate_series(1,200);"
+gosu postgres psql -v ON_ERROR_STOP=1 -c "SELECT pg_switch_wal();" > /dev/null
 gosu postgres pg_ctl -D /var/lib/postgresql/data -w stop`
 	if out, err := exec.CommandContext(ctx, "docker", "exec", id, "sh", "-c", seedScript).CombinedOutput(); err != nil {
 		t.Fatalf("seed pgbackrest repo: %v: %s", err, out)
 	}
+	target, err := exec.CommandContext(ctx, "docker", "exec", id, "cat", "/tmp/pitr-target").Output()
+	if err != nil {
+		t.Fatalf("read pitr target: %v", err)
+	}
 	if out, err := exec.CommandContext(ctx, "docker", "cp", id+":/tmp/repo", dest).CombinedOutput(); err != nil {
 		t.Fatalf("extract repo: %v: %s", err, out)
 	}
+	return strings.TrimSpace(string(target))
 }
 
 func makeFixture(t *testing.T, ctx context.Context, provider *docker.Provider, params map[string]string, dest string) {

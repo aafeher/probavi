@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
+	"time"
 )
 
 // Physical restore (pgbackrest source kind): unlike pg_restore, a pgBackRest
@@ -16,7 +18,26 @@ import (
 // start the server → wait for recovery to finish.
 const pgdataDir = "/var/lib/postgresql/data"
 
+// pgbackrestTimeFormat is the recovery-target form both pgbackrest
+// (--target) and postgresql (recovery_target_time) parse: an explicit UTC
+// offset, no RFC 3339 "T"/"Z" shorthand.
+const pgbackrestTimeFormat = "2006-01-02 15:04:05.000000+00"
+
 var stanzaPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// resolvePITRTarget converts the protocol's RFC 3339 pitr.target_time into
+// pgbackrest's --target form; empty when the drill did not request PITR.
+func resolvePITRTarget(req *provisionRequest) (string, *protoError) {
+	if req.PITR == nil {
+		return "", nil
+	}
+	ts, err := time.Parse(time.RFC3339, req.PITR.TargetTime)
+	if err != nil {
+		return "", protoErr("invalid_request", false,
+			"pitr.target_time %q is not an RFC 3339 timestamp", req.PITR.TargetTime)
+	}
+	return ts.UTC().Format(pgbackrestTimeFormat), nil
+}
 
 // provisionPhysical runs the pgbackrest provision flow and returns the
 // §6.2 response payload.
@@ -25,6 +46,10 @@ func provisionPhysical(ctx context.Context, c *core, req *provisionRequest, src 
 	if !stanzaPattern.MatchString(stanza) {
 		return nil, protoErr("invalid_request", false,
 			"pgbackrest source requires source.params.stanza (letters, digits, - and _)")
+	}
+	pitrTarget, perr := resolvePITRTarget(req)
+	if perr != nil {
+		return nil, perr
 	}
 	scratch := req.Sandbox.ScratchDir
 	if scratch == "" {
@@ -45,8 +70,16 @@ func provisionPhysical(ctx context.Context, c *core, req *provisionRequest, src 
 		return nil, perr
 	}
 
-	restore, stderr, perr := execChecked(ctx, c,
-		"gosu", "postgres", "pgbackrest", "--stanza="+stanza, "restore")
+	restoreArgv := []string{"gosu", "postgres", "pgbackrest", "--stanza=" + stanza, "restore"}
+	if pitrTarget != "" {
+		// --target-action=promote: recovery stops at the target and the
+		// instance opens read-write; the postgres default (pause) would
+		// leave the drill hanging at the target point forever.
+		restoreArgv = append(restoreArgv,
+			"--type=time", "--target="+pitrTarget, "--target-action=promote")
+		logger.Info("point-in-time recovery requested", "target", pitrTarget)
+	}
+	restore, stderr, perr := execChecked(ctx, c, restoreArgv...)
 	if perr != nil {
 		return nil, perr
 	}
@@ -140,19 +173,68 @@ chown postgres:postgres %s/pg_hba.conf`, pgdataDir, pgdataDir)
 		return 0, protoErr("internal", false, "write sandbox auth config: %s", firstLine(stderr))
 	}
 
-	start, stderr, perr := execChecked(ctx, c,
-		"gosu", "postgres", "pg_ctl", "-D", pgdataDir, "-w", "-t", "600", "-l", "/tmp/probavi-pg.log", "start")
+	// Start via sh so a failed start surfaces the server log's FATAL lines
+	// — for pitr that is where "recovery ended before configured recovery
+	// target" is reported.
+	startScript := fmt.Sprintf(
+		`gosu postgres pg_ctl -D %s -w -t 600 -l /tmp/probavi-pg.log start || { tail -n 20 /tmp/probavi-pg.log >&2; exit 1; }`,
+		pgdataDir)
+	start, stderr, perr := execChecked(ctx, c, "sh", "-c", startScript)
 	if perr != nil {
 		return 0, perr
 	}
 	if start.ExitCode != 0 {
-		return 0, protoErr("restore_failed", false, "restored cluster failed to start: %s", firstLine(stderr))
+		return 0, mapStartFailure(stderr)
 	}
 	readySeconds, perr := awaitEngine(ctx, c, defaultUser)
 	if perr != nil {
 		return 0, perr
 	}
-	return start.DurationSeconds + readySeconds, nil
+	promoteSeconds, perr := awaitPromotion(ctx, c)
+	if perr != nil {
+		return 0, perr
+	}
+	return start.DurationSeconds + readySeconds + promoteSeconds, nil
+}
+
+// mapStartFailure classifies a failed server start. Recovery ending before
+// the requested target is a verdict about the backup and its WAL archive —
+// they do not cover the target time — not an infrastructure error.
+func mapStartFailure(stderr []byte) *protoError {
+	if strings.Contains(string(stderr), "recovery ended before configured recovery target was reached") {
+		return protoErr("restore_failed", false,
+			"pitr target not reachable: recovery ended before the requested target time — the backup and its WAL archive do not cover it")
+	}
+	return protoErr("restore_failed", false, "restored cluster failed to start: %s", firstLine(stderr))
+}
+
+// awaitPromotion waits until recovery has finished and the instance is
+// writable. Hot standby answers pg_isready during WAL replay, so readiness
+// alone would let checks run against a still-recovering — for pitr,
+// possibly pre-target — instance.
+func awaitPromotion(ctx context.Context, c *core) (float64, *protoError) {
+	start := time.Now()
+	for {
+		val, stdout, _, perr := c.exec(ctx, execArgs{
+			Argv: []string{"psql", "-h", "127.0.0.1", "-U", defaultUser, "-d", defaultDatabase,
+				"-tA", "-c", "SELECT pg_is_in_recovery()"},
+			TimeoutSeconds: 5,
+		})
+		if perr != nil {
+			return 0, perr
+		}
+		if val.ExitCode == 0 && strings.TrimSpace(string(stdout)) == "f" {
+			return time.Since(start).Seconds(), nil
+		}
+		if time.Since(start) > readinessBudget {
+			return 0, protoErr("engine_not_ready", true, "recovery did not finish within %s", readinessBudget)
+		}
+		select {
+		case <-ctx.Done():
+			return 0, protoErr("cancelled", true, "cancelled while waiting for recovery to finish")
+		case <-time.After(readinessPoll):
+		}
+	}
 }
 
 // execChecked wraps core.exec returning the value and raw stderr.

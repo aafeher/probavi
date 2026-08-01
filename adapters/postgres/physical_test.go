@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -96,15 +97,20 @@ func physicalHandler(t *testing.T, sequence *[]string) func(verbCall) (any, *pro
 			t.Fatalf("exec args: %v", err)
 		}
 		head := strings.Join(args.Argv[:min(3, len(args.Argv))], " ")
+		if args.Argv[0] == "sh" && strings.Contains(args.Argv[2], "pg_ctl") {
+			head = "sh: pg_ctl start"
+		}
 		*sequence = append(*sequence, head)
 		switch {
 		case args.Argv[0] == "pg_isready" && len(*sequence) <= 2:
 			return okExec(2), nil // idle: engine not running
 		case args.Argv[0] == "pg_isready":
 			return okExec(0), nil // after start: ready
+		case args.Argv[0] == "psql":
+			return outExec("f\n"), nil // recovery finished, promoted
 		case head == "gosu postgres pgbackrest":
 			return execValue{ExitCode: 0, DurationSeconds: 3.5}, nil
-		case head == "gosu postgres pg_ctl":
+		case head == "sh: pg_ctl start":
 			return execValue{ExitCode: 0, DurationSeconds: 2.0}, nil
 		default:
 			return okExec(0), nil
@@ -131,7 +137,8 @@ func TestProvisionPhysicalHappyPath(t *testing.T) {
 		"put_file",                 // repo transfer
 		"sh -c",                    // prepare (config + empty PGDATA + chown)
 		"gosu postgres pgbackrest", // the restore itself
-		"gosu postgres pg_ctl",     // start + recovery
+		"sh: pg_ctl start",         // start + recovery
+		"psql -h 127.0.0.1",        // promotion check: recovery must be over
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("sequence %q missing %q", joined, want)
@@ -220,6 +227,99 @@ func TestProvisionPhysicalFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+func pitrPayload(repo, target string) string {
+	return fmt.Sprintf(
+		`{"source":{"kind":"pgbackrest","path":%q,"params":{"stanza":"demo"}},"sandbox":{"scratch_dir":"/scratch"},"options":{},"pitr":{"target_time":%q}}`,
+		repo, target)
+}
+
+func TestProvisionPhysicalPITR(t *testing.T) {
+	repo := writeRepoFixture(t)
+	var sequence []string
+	line, calls, exit := driveOp(t, "provision", pitrPayload(repo, "2026-07-30T14:32:00Z"), physicalHandler(t, &sequence))
+	if exit != 0 {
+		t.Fatalf("exit = %d", exit)
+	}
+	if f := parseFinal(t, line); !f.OK {
+		t.Fatalf("final = %+v", f)
+	}
+
+	var restoreArgv []string
+	for _, call := range calls {
+		if call.Verb != "exec" {
+			continue
+		}
+		args := execArgs{}
+		if err := json.Unmarshal(call.Args, &args); err != nil {
+			t.Fatalf("args: %v", err)
+		}
+		if slices.Contains(args.Argv, "restore") {
+			restoreArgv = args.Argv
+		}
+	}
+	for _, want := range []string{
+		"--type=time",
+		"--target=2026-07-30 14:32:00.000000+00", // RFC 3339 Z converted to pgbackrest's form
+		"--target-action=promote",
+	} {
+		if !slices.Contains(restoreArgv, want) {
+			t.Errorf("restore argv %v missing %q", restoreArgv, want)
+		}
+	}
+}
+
+// startFailsBeforeTarget simulates a restore whose WAL archive ends before
+// the requested pitr target: the server refuses to start and the FATAL
+// reaches stderr via the log tail.
+func startFailsBeforeTarget(t *testing.T) func(verbCall) (any, *protoError) {
+	return func(call verbCall) (any, *protoError) {
+		if call.Verb == "put_file" {
+			return putFileValue{}, nil
+		}
+		args := execArgs{}
+		if err := json.Unmarshal(call.Args, &args); err != nil {
+			t.Fatalf("args: %v", err)
+		}
+		switch {
+		case args.Argv[0] == "pg_isready":
+			return okExec(2), nil // idle
+		case args.Argv[0] == "sh" && strings.Contains(args.Argv[2], "pg_ctl"):
+			return errExec(1, "pg_ctl: could not start server\nFATAL:  recovery ended before configured recovery target was reached"), nil
+		default:
+			return okExec(0), nil
+		}
+	}
+}
+
+func TestPITRRequestHandling(t *testing.T) {
+	repo := writeRepoFixture(t)
+
+	t.Run("malformed target_time refused", func(t *testing.T) {
+		line, _, _ := driveOp(t, "provision", pitrPayload(repo, "yesterday 14:32"), mustNotBeCalled(t))
+		f := parseFinal(t, line)
+		if f.OK || f.Error.Code != "invalid_request" || !strings.Contains(f.Error.Message, "RFC 3339") {
+			t.Errorf("final = %+v, want invalid_request about RFC 3339", f)
+		}
+	})
+
+	t.Run("logical source kind refused", func(t *testing.T) {
+		payload := `{"source":{"kind":"pgdump","path":"/nonexistent.dump"},"pitr":{"target_time":"2026-07-30T14:32:00Z"}}`
+		line, _, _ := driveOp(t, "provision", payload, mustNotBeCalled(t))
+		f := parseFinal(t, line)
+		if f.OK || f.Error.Code != "invalid_request" || !strings.Contains(f.Error.Message, "pgbackrest") {
+			t.Errorf("final = %+v, want invalid_request naming pgbackrest", f)
+		}
+	})
+
+	t.Run("unreachable target is a restore verdict", func(t *testing.T) {
+		line, _, _ := driveOp(t, "provision", pitrPayload(repo, "2026-07-30T14:32:00Z"), startFailsBeforeTarget(t))
+		f := parseFinal(t, line)
+		if f.OK || f.Error.Code != "restore_failed" || !strings.Contains(f.Error.Message, "not reachable") {
+			t.Errorf("final = %+v, want restore_failed about an unreachable target", f)
+		}
+	})
 }
 
 func TestRepoNewestMtimeIsCreatedAt(t *testing.T) {
