@@ -99,11 +99,31 @@ jobs:
           chmod 600 ~/.ssh/authorized_keys
           ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null
           ssh 127.0.0.1 docker version --format '{{.Server.Version}}'
+      - name: set up remotehost target (bare-host sandbox provider)
+        # The bare-host provider drives a dedicated drill host over plain
+        # ssh + systemd — looped back to this runner. The polkit rule below
+        # is exactly the one the README ships for the dedicated drill user;
+        # here that user is the runner itself. The probe at the end proves
+        # the whole chain (ssh → polkit → transient unit) before the tests.
+        run: |
+          sudo install -d -o "$(id -un)" -g "$(id -gn)" /var/lib/probavi-drills
+          sudo tee /etc/polkit-1/rules.d/50-probavi-drill.rules >/dev/null <<EOF
+          polkit.addRule(function(action, subject) {
+              if (action.id == "org.freedesktop.systemd1.manage-units" &&
+                  subject.user == "$(id -un)") {
+                  return polkit.Result.YES;
+              }
+          });
+          EOF
+          sudo systemctl restart polkit
+          ssh 127.0.0.1 systemd-run --quiet --collect --wait --pipe --slice=probavi-ci-probe.slice true
+          ssh 127.0.0.1 systemctl stop probavi-ci-probe.slice
       - name: integration tests
-        # PROBAVI_IT_K8S=1 / PROBAVI_IT_SSH=1: with the setup steps above,
-        # an unreachable cluster or ssh target is a hard failure — these
-        # tests must never silently skip the axes this job exists to prove.
-        run: PROBAVI_IT_K8S=1 PROBAVI_IT_SSH=1 go test -race -tags integration ./...
+        # PROBAVI_IT_K8S=1 / PROBAVI_IT_SSH=1 / PROBAVI_IT_REMOTEHOST=1:
+        # with the setup steps above, an unreachable cluster or ssh target
+        # is a hard failure — these tests must never silently skip the axes
+        # this job exists to prove.
+        run: PROBAVI_IT_K8S=1 PROBAVI_IT_SSH=1 PROBAVI_IT_REMOTEHOST=1 go test -race -tags integration ./...
 
   vulncheck:
     name: Known-vulnerability scan

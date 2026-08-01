@@ -13,6 +13,17 @@ always called out explicitly.
 
 ### Added
 
+- `remotehost` sandbox provider: restore drills on dedicated hosts that
+  cannot run any container runtime, over plain SSH + systemd
+  (`docs/sandbox-bare-host.md`). One sandbox is one transient systemd
+  slice plus one per-drill workspace; every command — including the
+  engine the adapter starts — runs as a transient unit inside the slice,
+  so resource caps bound the whole sandbox and stopping the slice kills
+  the entire process tree. Cleanup is three-layered (destroy on every
+  outcome, host-scoped orphan sweep, target-side deadline timer that
+  survives a vanished drill host). The target is selected with
+  `PROBAVI_SSH_TARGET` in the environment only; connection details never
+  enter drill config or evidence records.
 - Remote Docker over SSH: the docker sandbox provider is documented and
   CI-proven against remote daemons selected with `DOCKER_HOST=ssh://…` —
   drills run on the remote machine while backups stream through the SSH
