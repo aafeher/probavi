@@ -60,7 +60,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
 ## Phase 4 — Ecosystem
 
 - [ ] MongoDB adapter; SQL Server adapter (community-driven if possible).
-- [ ] Bare-host SSH sandbox provider (no container runtime on the target). Spec first: it must answer how isolation, engine/tool version matching, ephemeral storage, and guaranteed cleanup survive without containers before any code — the current answer for remote drills is the docker provider over `DOCKER_HOST=ssh://…`.
+- [ ] Bare-host SSH sandbox provider (no container runtime on the target). Spec first: it must answer how isolation, engine/tool version matching, ephemeral storage, and guaranteed cleanup survive without containers before any code — the current answer for remote drills is the docker provider over `DOCKER_HOST=ssh://…`. **Design spec approved 2026-08-01 (`docs/sandbox-bare-host.md`, transient systemd slice + per-drill workspace over the ssh CLI) with the §8 decisions: provider name `remotehost`, polkit privilege model, unix-socket-first, systemd ≥ 244. Implementation may start any time.**
 - [ ] DR game-day orchestration: multi-database, dependency-ordered restore drills.
 - [ ] Notification integrations (webhook first; Slack/email via webhook recipes).
 - [ ] Internationalization (i18n): make user-facing output — CLI messages, dashboard UI, audit report exports — localizable into any national language. English remains the canonical source language; evidence records, specs, and the codebase stay English-only (they are canonical machine/contract formats, not UI).
