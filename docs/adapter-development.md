@@ -2,7 +2,9 @@
 
 This guide walks you through building an engine adapter for Probavi in any
 language. The protocol specification (`adapter-protocol.md`) is normative;
-this document is the practical companion. Both in-repo adapters
+this document is the practical companion, and `schemas/adapter/` holds
+machine-readable JSON Schemas (draft 2020-12) for every message and payload
+shape — wire them into your test suite from day one. Both in-repo adapters
 (`adapters/postgres`, `adapters/mysql`) were written from the spec alone —
 standard library only, zero imports from the Probavi core — as proof that
 the documents suffice.

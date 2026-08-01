@@ -1,9 +1,12 @@
 # Probavi Adapter Protocol — v0
 
-Status: **v0 — approved by the maintainer 2026-07-31. NORMATIVE.**
-The core and all adapters implement this document. Any change requires a
-version bump here before any code changes. The key words MUST, MUST NOT,
-SHOULD, and MAY are to be interpreted as described in RFC 2119.
+Status: **v0 — approved by the maintainer 2026-07-31; FROZEN 2026-08-01.
+NORMATIVE.** The core and all adapters implement this document. Any change
+requires a version bump here before any code changes. The key words MUST,
+MUST NOT, SHOULD, and MAY are to be interpreted as described in RFC 2119.
+Machine-readable JSON Schemas for every message and payload shape live in
+`docs/schemas/adapter/` (derived from this document; on any disagreement
+this document wins).
 
 Protocol identifier: `probavi-adapter/0`.
 
@@ -527,11 +530,15 @@ restores) conflict with the simulated sandbox's always-succeeding `exec`;
 run conformance against a logical kind — the protocol-discipline checks
 cover the operations, not every engine flow.
 
-## 11. Remaining before v0 freeze
+## 11. v0 freeze
 
-- [ ] Machine-readable JSON Schemas for all message and payload shapes
-      (`docs/schemas/adapter/*.json`), generated from this document and
-      verified in CI against the golden-file tests.
+**v0 is frozen as of 2026-08-01** — every item below is complete. Any
+further change to this protocol is a version bump (§8).
+
+- [x] Machine-readable JSON Schemas for all message and payload shapes
+      (`docs/schemas/adapter/*.json`), derived from this document and
+      verified in CI against the golden-file tests plus positive and
+      negative message samples (`internal/spec`). Done 2026-08-01.
 - [x] Conformance suite: exact test list frozen alongside the Phase 2
       implementation (§10, 2026-08-01).
 
@@ -545,4 +552,6 @@ cover the operations, not every engine flow.
   with the evidence schema's `timings_ms` integer-millisecond naming.
   2026-08-01 (no wire change): §10 conformance check list frozen alongside
   the `probavi adapter conformance` implementation, closing the second §11
-  item.
+  item. 2026-08-01 (no wire change): machine-readable JSON Schemas added
+  under `docs/schemas/adapter/`, CI-verified against the golden files and
+  message samples — §11 complete, **v0 frozen**.

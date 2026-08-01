@@ -135,6 +135,37 @@ func TestFrozenV0LogVerifies(t *testing.T) {
 	}
 }
 
+// TestWorkedExampleVerifiesWithCommittedKey completes the evidence-schema.md
+// §11 worked example: the committed 3-record golden logs verify offline with
+// only the committed public key file (testdata/signer.pub) — exactly the
+// position an external auditor is in. The key pair is the deterministic test
+// key (seed bytes 0x00…0x1f, see testSeed).
+func TestWorkedExampleVerifiesWithCommittedKey(t *testing.T) {
+	pub, err := LoadPublicKey(filepath.Join("testdata", "signer.pub"))
+	if err != nil {
+		t.Fatalf("load committed public key: %v", err)
+	}
+	if got, want := PublicKeyID(pub), testSigner().KeyID(); got != want {
+		t.Fatalf("committed key id %s does not match the golden signer %s", got, want)
+	}
+	for _, golden := range []string{"log_v0.golden", "log_v1.golden"} {
+		f, err := os.Open(filepath.Join("testdata", golden))
+		if err != nil {
+			t.Fatalf("open %s: %v", golden, err)
+		}
+		res, verr := Verify(f, NewKeyring(pub))
+		if cerr := f.Close(); cerr != nil {
+			t.Fatalf("close %s: %v", golden, cerr)
+		}
+		if verr != nil {
+			t.Fatalf("Verify %s: %v", golden, verr)
+		}
+		if res.Status != StatusValid || res.Records != 3 {
+			t.Fatalf("%s: %s with %d records, want VALID with 3 (%s)", golden, res.Status, res.Records, res.Reason)
+		}
+	}
+}
+
 // TestChainContinuesAcrossSchemaVersions covers the upgrade path the schema
 // guarantees: a log started under v0 keeps its chain when the writer starts
 // emitting v1 records mid-file.

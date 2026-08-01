@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/adapter/provision-response.json",
+  "title": "Probavi adapter protocol v0 — provision response payload",
+  "description": "Connection info, source identity, measured timings, and opaque state returned by a successful provision (adapter-protocol.md §6.2).",
+  "$comment": "Derived from docs/adapter-protocol.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "connection": { "$ref": "#/$defs/connection" },
+    "source_identity": {
+      "type": "object",
+      "properties": {
+        "checksum": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 over the source bytes; multi-file sources document their canonical hashing rule in the adapter README."
+        },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "created_at": {
+          "oneOf": [{ "$ref": "#/$defs/rfc3339" }, { "type": "null" }],
+          "description": "The backup's own creation time if derivable, else null."
+        }
+      },
+      "required": ["checksum", "size_bytes", "created_at"],
+      "additionalProperties": false
+    },
+    "timings": {
+      "type": "object",
+      "description": "Real measurements from a monotonic clock, never estimates (§7).",
+      "properties": {
+        "engine_ready_seconds": { "type": "number", "minimum": 0 },
+        "transfer_seconds": { "type": "number", "minimum": 0 },
+        "restore_seconds": { "type": "number", "minimum": 0 }
+      },
+      "required": ["engine_ready_seconds", "transfer_seconds", "restore_seconds"],
+      "additionalProperties": false
+    },
+    "state": {
+      "type": "object",
+      "description": "Opaque to the core: stored as-is, passed verbatim to healthcheck and teardown. No secrets."
+    }
+  },
+  "required": ["connection", "source_identity", "timings", "state"],
+  "additionalProperties": false,
+  "$defs": {
+    "connection": {
+      "title": "connection object (§6.2)",
+      "description": "Reachability from inside the sandbox. password_env names an environment variable — never a value.",
+      "type": "object",
+      "properties": {
+        "scheme": { "type": "string", "minLength": 1 },
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "database": { "type": "string" },
+        "user": { "type": "string" },
+        "password_env": { "type": "string", "minLength": 1 }
+      },
+      "required": ["scheme", "host", "port", "database", "user"],
+      "additionalProperties": false
+    },
+    "rfc3339": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})$"
+    }
+  }
+}
