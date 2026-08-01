@@ -1,0 +1,86 @@
+# Probavi release — runs when a v* tag is pushed. Tags are cut only from
+# main, which every CI gate already protects; this workflow builds the
+# artifacts reproducibly (AGENTS.md §3.3) and drafts the GitHub release for
+# the maintainer to review and publish. Third-party actions are pinned to
+# commit SHAs (supply-chain rule, §3.3).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build artifacts and draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: sanity build
+        run: go build ./... && go vet ./...
+
+      - name: build reproducible artifacts
+        # CGO off, -trimpath, and an empty build id make the binary depend
+        # only on the source tree and the Go toolchain; the tar/gzip flags
+        # make the archives deterministic too. Anyone can rebuild and
+        # compare against SHA256SUMS — the instructions ship in the
+        # release notes.
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            name="probavi_${VERSION}_${goos}_${goarch}"
+            outdir="dist/${name}"
+            mkdir -p "${outdir}"
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
+              go build -trimpath -ldflags "-s -w -buildid= -X main.version=${VERSION}" \
+              -o "${outdir}/probavi" ./cmd/probavi
+            cp LICENSE README.md CHANGELOG.md "${outdir}/"
+            tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' \
+              -cf - -C "${outdir}" . | gzip -n -9 > "dist/${name}.tar.gz"
+            rm -r "${outdir}"
+          done
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - name: draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          {
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) for everything in ${GITHUB_REF_NAME}."
+            echo
+            echo "## Verify the download"
+            echo
+            echo '```sh'
+            echo "sha256sum -c SHA256SUMS --ignore-missing"
+            echo '```'
+            echo
+            echo "## Reproduce the binaries"
+            echo
+            echo "Built with \`$(go version | cut -d' ' -f3)\` (pinned by go.mod). To reproduce a binary bit for bit:"
+            echo
+            echo '```sh'
+            echo "git checkout ${GITHUB_REF_NAME}"
+            echo "CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> \\"
+            echo "  go build -trimpath -ldflags \"-s -w -buildid= -X main.version=${VERSION}\" \\"
+            echo "  -o probavi ./cmd/probavi"
+            echo '```'
+            echo
+            echo "The result matches the \`probavi\` binary inside the corresponding archive."
+          } > notes.md
+          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/SHA256SUMS \
+            --draft --verify-tag --title "probavi ${GITHUB_REF_NAME}" --notes-file notes.md
