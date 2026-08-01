@@ -52,6 +52,9 @@ type Record struct {
 type Drill struct {
 	Name       string `json:"name"`
 	ConfigHash string `json:"config_hash"`
+	// PITRTarget is the resolved absolute point-in-time recovery target the
+	// drill demanded of the adapter; nil when the drill did not request PITR.
+	PITRTarget *string `json:"pitr_target"`
 }
 
 // Backup identifies the backup source that was restored.
@@ -147,6 +150,11 @@ func (r *Record) validateIdentity() error {
 	}
 	if !sha256RefPattern.MatchString(r.Drill.ConfigHash) {
 		return fmt.Errorf("%w: drill.config_hash is not a sha256 reference", ErrInvalidRecord)
+	}
+	if r.Drill.PITRTarget != nil {
+		if err := validateTS("drill.pitr_target", *r.Drill.PITRTarget); err != nil {
+			return err
+		}
 	}
 	return nil
 }

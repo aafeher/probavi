@@ -27,6 +27,7 @@ type fakeAdapter struct {
 	healthEr    error
 	teardownErr error
 
+	provReq         *adapter.ProvisionRequest
 	teardownReasons []string
 	teardownStates  []string
 }
@@ -35,7 +36,8 @@ func (f *fakeAdapter) Probe(context.Context) (*adapter.ProbeResult, error) {
 	return f.probe, f.probeErr
 }
 
-func (f *fakeAdapter) Provision(context.Context, *adapter.ProvisionRequest, adapter.SandboxVerbs) (*adapter.ProvisionResult, error) {
+func (f *fakeAdapter) Provision(_ context.Context, req *adapter.ProvisionRequest, _ adapter.SandboxVerbs) (*adapter.ProvisionResult, error) {
+	f.provReq = req
 	return f.provRes, f.provErr
 }
 
@@ -329,6 +331,72 @@ func assertOutcome(t *testing.T, fa *fakeAdapter, fp *fakeProvider, wantOutcome 
 	}
 	if fp.created > 0 && fp.createErr == nil && fp.sbx.destroyed != 1 {
 		t.Error("created sandbox was not destroyed")
+	}
+}
+
+func TestRunPITRResolvedTargetReachesRecordAndAdapter(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+	fa.probe.Sources = []adapter.SourceKind{{Kind: "pgdump", Capabilities: adapter.Capabilities{PITR: true}}}
+	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
+	d, _ := newDrill(t, fa, fp)
+	d.Config.Target.PITR = &config.PITR{TargetAge: config.Duration(24 * time.Hour)}
+
+	rec, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Outcome != evidence.OutcomePass {
+		t.Fatalf("outcome = %s (%+v)", rec.Outcome, rec.Error)
+	}
+	if rec.Drill.PITRTarget == nil {
+		t.Fatal("record must carry the resolved pitr target")
+	}
+	// Run's fake clock ticks 50 ms per Now(): drill start, then the
+	// resolve inside baseRecord — so the target is base+100ms − 24h.
+	want := "2026-07-30T02:00:00.100Z"
+	if *rec.Drill.PITRTarget != want {
+		t.Errorf("drill.pitr_target = %q, want %q", *rec.Drill.PITRTarget, want)
+	}
+	if fa.provReq == nil || fa.provReq.PITR == nil || fa.provReq.PITR.TargetTime != want {
+		t.Errorf("provision request pitr = %+v, want the record's target %q — one resolution, two consumers", fa.provReq.PITR, want)
+	}
+}
+
+func TestRunPITRRefusedWithoutCapability(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
+	d, _ := newDrill(t, fa, fp)
+	d.Config.Target.PITR = &config.PITR{TargetAge: config.Duration(time.Hour)}
+
+	rec, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Outcome != evidence.OutcomeError || rec.Error == nil ||
+		rec.Error.Code != "unsupported_source" || !strings.Contains(rec.Error.Message, "point-in-time") {
+		t.Errorf("outcome = %s error = %+v, want unsupported_source about point-in-time recovery", rec.Outcome, rec.Error)
+	}
+	if fp.created != 0 {
+		t.Error("the capability gate must fire before a sandbox is created")
+	}
+	if rec.Drill.PITRTarget == nil {
+		t.Error("even a refused pitr drill must record what it asked for")
+	}
+}
+
+func TestRunWithoutPITRRecordsNull(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
+	d, _ := newDrill(t, fa, fp)
+	rec, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Drill.PITRTarget != nil {
+		t.Errorf("drill.pitr_target = %q, want nil", *rec.Drill.PITRTarget)
+	}
+	if fa.provReq.PITR != nil {
+		t.Errorf("provision request pitr = %+v, want absent (§6.2)", fa.provReq.PITR)
 	}
 }
 

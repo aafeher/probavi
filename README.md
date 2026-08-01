@@ -20,7 +20,7 @@ The output is not a green checkmark. It is an auditable, cryptographically verif
 
 ## Status
 
-**Pre-alpha, working end to end for PostgreSQL.** `probavi run` restores a real `pg_dump` (single file or newest-in-directory) into a disposable Docker sandbox, validates it, and appends a signed evidence record; `probavi evidence verify` proves the log offline. The adapter protocol and evidence schema specs in `docs/` are normative (v0). Not yet released — pgBackRest source support, packaging, and polish remain. See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
+**Pre-alpha, working end to end for PostgreSQL and MySQL.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`) and physical backups (pgBackRest, Percona XtraBackup) — into a disposable Docker sandbox, validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative. Not yet released — packaging and polish remain. See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
 
 ## Shape
 

@@ -93,7 +93,7 @@ func TestGoldenLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	golden := filepath.Join("testdata", "log_v0.golden")
+	golden := filepath.Join("testdata", "log_v1.golden")
 	if *updateGolden {
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
 			t.Fatalf("mkdir testdata: %v", err)
@@ -108,6 +108,65 @@ func TestGoldenLog(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Error("evidence log bytes differ from golden file — canonicalization, signing, or chain construction changed; this is a schema-breaking change unless the golden was intentionally regenerated with a spec bump")
+	}
+}
+
+// TestFrozenV0LogVerifies pins schema-version support forever: log_v0.golden
+// was written by the probavi-evidence/0 implementation and is byte-frozen —
+// it has no updater and MUST never be regenerated. Records already written
+// under a published version stay verifiable for the lifetime of the product
+// (evidence-schema.md §10).
+func TestFrozenV0LogVerifies(t *testing.T) {
+	f, err := os.Open(filepath.Join("testdata", "log_v0.golden"))
+	if err != nil {
+		t.Fatalf("open frozen v0 log: %v", err)
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+	}()
+	res, err := Verify(f, testKeyring())
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if res.Status != StatusValid || res.Records != 3 {
+		t.Fatalf("frozen v0 log: %s with %d records, want VALID with 3 (%s)", res.Status, res.Records, res.Reason)
+	}
+}
+
+// TestChainContinuesAcrossSchemaVersions covers the upgrade path the schema
+// guarantees: a log started under v0 keeps its chain when the writer starts
+// emitting v1 records mid-file.
+func TestChainContinuesAcrossSchemaVersions(t *testing.T) {
+	v0, err := os.ReadFile(filepath.Join("testdata", "log_v0.golden"))
+	if err != nil {
+		t.Fatalf("read frozen v0 log: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "evidence.jsonl")
+	if err := os.WriteFile(path, v0, 0o600); err != nil {
+		t.Fatalf("seed log: %v", err)
+	}
+
+	st, err := Open(path, testSigner(), nil)
+	if err != nil {
+		t.Fatalf("Open over v0 log: %v", err)
+	}
+	if st.NextSeq() != 4 {
+		t.Errorf("NextSeq = %d, want 4", st.NextSeq())
+	}
+	rec := sampleRecordPass()
+	rec.TS = "2026-08-01T02:00:00.000Z"
+	if err := st.Append(rec); err != nil {
+		t.Fatalf("Append v1 record: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	res := verifyFile(t, path, testKeyring())
+	if res.Status != StatusValid || res.Records != 4 {
+		t.Fatalf("mixed-version log: %s with %d records, want VALID with 4 (%s)", res.Status, res.Records, res.Reason)
 	}
 }
 
@@ -194,11 +253,22 @@ func TestTamperDetection(t *testing.T) {
 			l[0] = mutateLine(t, l[0], func(m map[string]any) { m["schema"] = "probavi-evidence/99" })
 			return l
 		}, "unsupported schema"},
+		{"schema downgrade hiding pitr_target", func(l []string) []string {
+			// The attack the v1 bump must resist: rewrite a v1 record as v0
+			// to make the PITR target disappear. The schema field is signed,
+			// so the downgrade breaks the signature, not just the field.
+			l[0] = mutateLine(t, l[0], func(m map[string]any) {
+				m["schema"] = SchemaIDv0
+				delete(asMap(t, m["drill"]), "pitr_target")
+			})
+			return l
+		}, "signature verification failed"},
 		{"field type mismatch", func(l []string) []string {
 			l[0] = mutateLine(t, l[0], func(m map[string]any) { m["seq"] = "one" })
 			return l
 		}, "decode record"},
 		{"non-canonical storage", func(l []string) []string { l[1] += " "; return l }, ErrNotCanonical.Error()},
+		{"canonical non-object line", func(l []string) []string { l[1] = "null"; return l }, "not a JSON object"},
 		{"float smuggling", func(l []string) []string {
 			l[1] = strings.Replace(l[1], `"provision":1170`, `"provision":1170.0`, 1)
 			return l

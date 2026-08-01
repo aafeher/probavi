@@ -11,9 +11,7 @@ enough to build an adapter.
 |--------------|----------------------------------------------------------------|
 | `pgdump`     | One `pg_dump` custom-format (`-Fc`) file.                      |
 | `pgdump_dir` | A directory of dump files; the newest regular file is restored (mtime, ties broken by name). |
-| `pgbackrest` | A pgBackRest repository directory (filesystem repo) — a physical restore. |
-
-Planned: PITR (`--type=time`) on top of `pgbackrest` — Phase 2.
+| `pgbackrest` | A pgBackRest repository directory (filesystem repo) — a physical restore. Declares the `pitr` capability. |
 
 ## The pgbackrest kind (physical restore)
 
@@ -35,7 +33,40 @@ the server: the restored cluster's own auth config expects credentials the
 drill does not have, and the sandbox has no network exposure whatsoever
 (`--network none`, no published ports), so trust never extends beyond the
 disposable container. Recovery replays WAL from the repo's archive; the
-measured `engine_ready` phase covers server start plus recovery.
+adapter waits until `pg_is_in_recovery()` reports false — checks never run
+against a still-recovering instance — and the measured `engine_ready` phase
+covers server start plus the full recovery.
+
+## Point-in-time recovery (pitr)
+
+The `pgbackrest` kind accepts the protocol's `pitr.target_time` (sent by the
+core when the drill config has a `target.pitr` block):
+
+```yaml
+target:
+  source:
+    kind: pgbackrest
+    path: /backups/orders/repo
+    params: {stanza: orders}
+  pitr:
+    target_age: "24h"     # or an absolute instant: target_time: "2026-07-30T14:32:00Z"
+```
+
+The adapter maps the target onto `pgbackrest restore --type=time
+--target=<instant> --target-action=promote`: recovery replays the archive up
+to the requested instant, then promotes to read-write. Semantics worth
+knowing:
+
+- The target must lie **after the backup's end** and **within the archived
+  WAL**. A target the archive cannot reach makes the server refuse to start
+  (`FATAL: recovery ended before configured recovery target was reached`),
+  which the adapter reports as `restore_failed` — a genuine recoverability
+  verdict about that backup + archive combination, and exactly what a PITR
+  drill exists to catch.
+- PostgreSQL stops at the first commit **after** the target, so the restored
+  state is "everything committed at or before `target_time`".
+- The logical kinds (`pgdump`, `pgdump_dir`) reject `pitr` — a dump is a
+  single frozen snapshot.
 
 ## Backup identity
 

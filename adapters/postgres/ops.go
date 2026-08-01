@@ -11,7 +11,7 @@ import (
 
 const (
 	adapterName    = "postgres"
-	adapterVersion = "0.2.0"
+	adapterVersion = "0.3.0"
 
 	defaultUser     = "postgres"
 	defaultDatabase = "postgres"
@@ -32,7 +32,7 @@ func probePayload() any {
 		"sources": []map[string]any{
 			{"kind": "pgdump", "capabilities": map[string]bool{"pitr": false}},
 			{"kind": "pgdump_dir", "capabilities": map[string]bool{"pitr": false}},
-			{"kind": "pgbackrest", "capabilities": map[string]bool{"pitr": false}},
+			{"kind": "pgbackrest", "capabilities": map[string]bool{"pitr": true}},
 		},
 		"sql_runner": map[string]any{
 			"argv": []string{"psql", "-U", "{{user}}", "-d", "{{database}}",
@@ -68,8 +68,8 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 	if err := json.Unmarshal(payload, req); err != nil {
 		return nil, protoErr("invalid_request", false, "malformed provision payload")
 	}
-	if req.PITR != nil {
-		return nil, protoErr("invalid_request", false, "this adapter does not support pitr yet")
+	if req.PITR != nil && req.Source.Kind != "pgbackrest" {
+		return nil, protoErr("invalid_request", false, "pitr is only supported by the pgbackrest source kind")
 	}
 	user := option(req.Options, "user", defaultUser)
 	database := option(req.Options, "database", defaultDatabase)
