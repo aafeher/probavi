@@ -83,9 +83,13 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 		return exitEvidenceLost
 	}
 	if drill.Config.Metrics != nil {
-		if merr := metrics.WriteTextfile(drill.Config.Metrics.PrometheusTextfile, rec); merr != nil {
-			// Metrics are observability, not evidence: failure is loud but
-			// never changes the drill verdict.
+		// Metrics are observability, not evidence: failures are loud but
+		// never change the drill verdict.
+		trend, terr := metrics.RestoreTrend(evidencePath, drill.Config.Target.Name)
+		if terr != nil {
+			logger.Error("compute restore trend", "err", terr)
+		}
+		if merr := metrics.WriteTextfile(drill.Config.Metrics.PrometheusTextfile, rec, trend); merr != nil {
 			logger.Error("write metrics textfile", "err", merr)
 		}
 	}

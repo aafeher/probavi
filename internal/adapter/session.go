@@ -169,9 +169,13 @@ func (s *session) readLoop(ctx context.Context, op, requestID string, verbs Sand
 				return nil, crashf("%s: sandbox_call is a protocol violation in this operation", op)
 			}
 			result := dispatchVerb(ctx, verbs, guard, env.SandboxCall)
-			if err := s.writeSandboxResult(requestID, result); err != nil {
+			if err := s.writeSandboxResult(requestID, result); err != nil && !closedPipe(err) {
 				return nil, crashf("%s: write sandbox_result: %v", op, err)
 			}
+			// A closed pipe is not the verdict (same rule as the request
+			// write): the adapter stopped listening mid-conversation, and
+			// the loop's next read — EOF, a late final response, or a
+			// protocol violation — classifies what actually happened.
 		case env.OK != nil:
 			return env, nil
 		default:

@@ -54,8 +54,11 @@ func TestFullDrillViaCLI(t *testing.T) {
 		t.Fatalf("summary = %+v, want a passing drill with measured restore time", summary)
 	}
 	if raw, err := os.ReadFile(metricsPath); err != nil ||
-		!strings.Contains(string(raw), "probavi_last_success_timestamp_seconds") {
-		t.Errorf("metrics file: err=%v content=%s", err, raw)
+		!strings.Contains(string(raw), "probavi_last_success_timestamp_seconds") ||
+		!strings.Contains(string(raw), `probavi_restore_duration_rolling_seconds`) ||
+		!strings.Contains(string(raw), `quantile="0.95"`) ||
+		!strings.Contains(string(raw), "probavi_restore_trend_samples") {
+		t.Errorf("metrics file must carry the last-run and rolling-trend series: err=%v content=%s", err, raw)
 	}
 
 	// Drill 2: a corrupt backup must fail with exit 1 — and still leave a

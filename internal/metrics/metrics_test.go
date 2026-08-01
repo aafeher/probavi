@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,7 +30,7 @@ func sampleRecord(outcome evidence.Outcome) *evidence.Record {
 
 func TestWriteTextfile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "probavi.prom")
-	if err := WriteTextfile(path, sampleRecord(evidence.OutcomePass)); err != nil {
+	if err := WriteTextfile(path, sampleRecord(evidence.OutcomePass), nil); err != nil {
 		t.Fatalf("WriteTextfile: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -59,7 +60,7 @@ func TestWriteTextfileFailedDrill(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "probavi.prom")
 	rec := sampleRecord(evidence.OutcomeFail)
 	rec.Timings.Restore = nil // restore never ran
-	if err := WriteTextfile(path, rec); err != nil {
+	if err := WriteTextfile(path, rec, nil); err != nil {
 		t.Fatalf("WriteTextfile: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -82,7 +83,7 @@ func TestWriteTextfileEdges(t *testing.T) {
 	rec := sampleRecord(evidence.OutcomePass)
 	rec.Drill.Name = "we\"ird\\name\nx"
 	path := filepath.Join(t.TempDir(), "probavi.prom")
-	if err := WriteTextfile(path, rec); err != nil {
+	if err := WriteTextfile(path, rec, nil); err != nil {
 		t.Fatalf("WriteTextfile: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -94,12 +95,109 @@ func TestWriteTextfileEdges(t *testing.T) {
 	}
 
 	rec.TS = "not-a-timestamp"
-	if err := WriteTextfile(path, rec); err == nil {
+	if err := WriteTextfile(path, rec, nil); err == nil {
 		t.Error("malformed record ts must be an error")
 	}
 	if err := WriteTextfile(filepath.Join(t.TempDir(), "no", "dir", "x.prom"),
-		sampleRecord(evidence.OutcomePass)); err == nil {
+		sampleRecord(evidence.OutcomePass), nil); err == nil {
 		t.Error("unwritable path must be an error")
+	}
+}
+
+// logLine builds one evidence-log line with just the fields the trend
+// scanner reads; metrics never verify, so the rest may be absent.
+func logLine(drill string, restoreMS int64) string {
+	return fmt.Sprintf(`{"drill":{"name":%q},"timings_ms":{"restore":%d}}`, drill, restoreMS)
+}
+
+func writeLog(t *testing.T, lines ...string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "evidence.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	return path
+}
+
+func TestRestoreTrend(t *testing.T) {
+	lines := []string{
+		logLine("other-drill", 99999),            // other drills never mix in
+		`{"drill":{"name":"d"},"timings_ms":{}}`, // restore never ran: no sample
+		"{torn tail fragment",                    // damage is verify's business
+		logLine("d", 300), logLine("d", 100), logLine("d", 200),
+	}
+	trend, err := RestoreTrend(writeLog(t, lines...), "d")
+	if err != nil {
+		t.Fatalf("RestoreTrend: %v", err)
+	}
+	if trend.Samples != 3 || trend.P50 != 200 || trend.P95 != 300 || trend.Max != 300 {
+		t.Errorf("trend = %+v, want 3 samples with p50 200, p95 300, max 300", trend)
+	}
+}
+
+func TestRestoreTrendWindowSlides(t *testing.T) {
+	lines := make([]string, 0, TrendWindow+5)
+	for i := 1; i <= TrendWindow+5; i++ {
+		lines = append(lines, logLine("d", int64(i)))
+	}
+	trend, err := RestoreTrend(writeLog(t, lines...), "d")
+	if err != nil {
+		t.Fatalf("RestoreTrend: %v", err)
+	}
+	// The first 5 samples fell out of the window: values are 6..105.
+	if trend.Samples != TrendWindow || trend.P50 != 55 || trend.P95 != 100 || trend.Max != 105 {
+		t.Errorf("trend = %+v, want the oldest samples evicted (p50 55, p95 100, max 105)", trend)
+	}
+}
+
+func TestRestoreTrendEdges(t *testing.T) {
+	trend, err := RestoreTrend(writeLog(t, logLine("d", 42)), "d")
+	if err != nil || trend.Samples != 1 || trend.P50 != 42 || trend.P95 != 42 || trend.Max != 42 {
+		t.Errorf("single sample: %+v err=%v, want every quantile 42", trend, err)
+	}
+
+	trend, err = RestoreTrend(writeLog(t, logLine("elsewhere", 1)), "d")
+	if err != nil || trend.Samples != 0 {
+		t.Errorf("no samples: %+v err=%v, want empty trend", trend, err)
+	}
+
+	if _, err := RestoreTrend(filepath.Join(t.TempDir(), "missing.jsonl"), "d"); err == nil {
+		t.Error("a missing log must be an error, not an empty trend")
+	}
+}
+
+func TestWriteTextfileRendersTrend(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "probavi.prom")
+	trend := &Trend{Samples: 12, P50: 250, P95: 900, Max: 1200}
+	if err := WriteTextfile(path, sampleRecord(evidence.OutcomePass), trend); err != nil {
+		t.Fatalf("WriteTextfile: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	out := string(raw)
+	for _, want := range []string{
+		`probavi_restore_duration_rolling_seconds{drill="prod-orders-db",quantile="0.5"} 0.25`,
+		`probavi_restore_duration_rolling_seconds{drill="prod-orders-db",quantile="0.95"} 0.9`,
+		`probavi_restore_duration_rolling_seconds{drill="prod-orders-db",quantile="1"} 1.2`,
+		`probavi_restore_trend_samples{drill="prod-orders-db"} 12`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	// An empty trend must leave the file free of trend series entirely.
+	if err := WriteTextfile(path, sampleRecord(evidence.OutcomePass), &Trend{}); err != nil {
+		t.Fatalf("WriteTextfile empty trend: %v", err)
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(raw), "rolling") || strings.Contains(string(raw), "trend_samples") {
+		t.Errorf("empty trend must render nothing:\n%s", raw)
 	}
 }
 
@@ -107,7 +205,7 @@ func TestWriteTextfilePublishFailure(t *testing.T) {
 	// The tempfile write succeeds, but renaming onto an existing directory
 	// cannot: the atomic-publish step must surface its own error.
 	dir := t.TempDir()
-	if err := WriteTextfile(dir, sampleRecord(evidence.OutcomePass)); err == nil {
+	if err := WriteTextfile(dir, sampleRecord(evidence.OutcomePass), nil); err == nil {
 		t.Error("renaming over a directory must fail loudly")
 	}
 }
