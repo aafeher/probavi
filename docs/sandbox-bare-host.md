@@ -1,7 +1,10 @@
-# Bare-host SSH sandbox provider — design spec
+# Bare-host SSH sandbox provider (`remotehost`) — design spec
 
-Status: **DRAFT — awaiting maintainer approval. Not normative, no code
-until approved** (AGENTS.md §5.1). Tracked by the ROADMAP Phase 4 item.
+Status: **Approved by the maintainer 2026-08-01** (with the §8 decisions:
+provider name `remotehost`, system-level polkit privilege model,
+unix-socket-first engine addressing, systemd ≥ 244). Design-normative for
+the implementation; changing a decision here comes before changing code
+(AGENTS.md §5.1). Tracked by the ROADMAP Phase 4 item.
 
 This document answers the four questions that made bare-host drills a
 spec-first task: how isolation, engine/tool version matching, ephemeral
@@ -63,24 +66,25 @@ Lifecycle mapping (command shapes, subject to implementation detail):
 ## 3. Target host requirements
 
 - Dedicated to drills (§1) — REQUIRED, not advisory.
-- systemd as PID 1 with `systemd-run`/`systemctl` available to the drill
-  user (v244+ gives everything used here; exact floor fixed at
-  implementation time).
+- systemd as PID 1, **version ≥ 244**, with `systemd-run`/`systemctl`
+  available to the drill user; the provider probes the version at first
+  contact and refuses older targets with a clear error.
 - The engine toolchain(s) installed **at versions matching the backups
   under test** — see §4.
 - A dedicated OS user for drills, key-based SSH only. Root is not
-  required if the operator grants the drill user transient-unit rights
-  (system-level via polkit, or `systemd-run --user` with lingering
-  enabled — chosen at implementation time; `--user` mode cannot enforce
-  `MemoryMax` on some cgroup setups, which the probe must detect and
-  report rather than silently drop).
+  required: the operator grants the drill user **system-level
+  transient-unit rights via a polkit rule** (decided; a documented,
+  copy-pasteable rule ships with the provider). `systemd-run --user` was
+  rejected as the default because it cannot enforce `MemoryMax` on some
+  cgroup setups — resource caps that silently do not bind have no place
+  in a trust product.
 
 ## 4. What containers gave us — and what survives
 
 | Guarantee | Docker/K8s | Bare host |
 |---|---|---|
 | Engine/tool version match | image tag pins both | **Operator duty.** The drill config's expectations meet whatever is installed; a mismatch surfaces as an honest `restore_failed`, not a silent wrong-version pass — but keeping versions aligned is on the operator. Documented, not solved. |
-| Network isolation | `--network none` / NetworkPolicy | Engines are restored listening on unix sockets in the workspace, or loopback with a per-drill port when the engine's tooling demands TCP. Nothing binds beyond loopback by design; host-level firewalling stays the operator's job. |
+| Network isolation | `--network none` / NetworkPolicy | **Unix-socket-first** (decided): engines are restored listening on unix sockets in the workspace; loopback TCP with a per-drill port is the fallback only where an engine's tooling cannot work socket-only. Nothing binds beyond loopback by design; host-level firewalling stays the operator's job. |
 | Ephemeral storage | volumes die with the container | Workspace `rm -rf` on destroy. Bytes are deleted, not shredded: restored production data touches the target's persistent disks. Mitigations the docs will recommend: workspace on tmpfs, or full-disk encryption on the target. |
 | Resource caps | cgroup per container | cgroup per slice — equivalent. |
 | Forced destruction | `rm -f` / Job deadline | Slice stop kills the tree; deadline backstop in §5. |
@@ -125,7 +129,7 @@ Three independent layers, mirroring the k8s provider's philosophy:
 
 ```yaml
 sandbox:
-  provider: bare        # name open — see §8
+  provider: remotehost
   params:
     workspace_root: /var/lib/probavi-drills   # default TBD
     memory: 2G                                # slice MemoryMax
@@ -137,20 +141,20 @@ sandbox:
 Params stay evidence-safe (paths and caps only). No `image` param exists;
 its absence is what the provider *is*.
 
-## 8. Open questions (maintainer decides before approval)
+## 8. Decisions (resolved by the maintainer, 2026-08-01)
 
-1. **Provider name**: `bare` | `sshhost` | `remotehost`. (`ssh` alone is
-   confusing since remote Docker also rides SSH.)
-2. **Privilege model default**: system systemd-run via polkit rule vs
-   `--user` mode with lingering (weaker caps on some setups, but no
-   polkit configuration to explain).
-3. **Engine addressing default**: unix-socket-first (no port collisions,
-   nothing on TCP at all) vs loopback-port-first (closer to what the
-   existing adapters emit in `connection`). Unix-first likely requires a
-   small, engine-side choice in each adapter — to be confirmed against
-   the protocol before any protocol change is proposed (none is expected:
-   `connection.host` already carries what the adapter decides).
-4. **Minimum systemd version** to require and probe for.
+1. **Provider name**: `remotehost`. (`ssh` alone would be confusing since
+   remote Docker also rides SSH; `bare` says nothing to a config reader.)
+2. **Privilege model**: system-level `systemd-run` granted through a
+   polkit rule (shipped, documented). `--user` mode rejected as default —
+   see §3 for the rationale.
+3. **Engine addressing**: unix-socket-first; loopback TCP with a
+   per-drill port only as documented fallback. No protocol change is
+   expected: `connection.host`/`connection.scheme` already carry whatever
+   the adapter decides; whether an adapter needs a socket-directory hint
+   is confirmed against protocol §6.2 `sandbox` during implementation,
+   and any protocol change would go through its own version bump first.
+4. **Minimum systemd version**: 244, probed at first contact (§3).
 
 ## 9. Rejected alternatives
 
