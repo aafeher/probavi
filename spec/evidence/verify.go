@@ -1,0 +1,248 @@
+package evidence
+
+import (
+	"bufio"
+	"bytes"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+)
+
+// Status is the verdict over a whole log (evidence-schema.md §9).
+type Status string
+
+const (
+	// StatusValid means every record is authentic, complete and in order.
+	StatusValid Status = "VALID"
+	// StatusValidDamage means the above holds for every parseable record,
+	// but the file also contains unparseable fragments — a crash artifact,
+	// not a forgery (§9 security note).
+	StatusValidDamage Status = "VALID_WITH_DAMAGE"
+	// StatusInvalid means a record failed authenticity, ordering or
+	// continuity. The log cannot be trusted.
+	StatusInvalid Status = "INVALID"
+)
+
+// genesisPrevHash is the prev_hash of the first record in a file (§5).
+const genesisPrevHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+// supportedSchemas lists every published schema version. §10 requires a
+// verifier to support all of them for the lifetime of the format: records
+// already written under an old version must stay verifiable forever.
+var supportedSchemas = map[string]bool{
+	"probavi-evidence/0": true,
+	"probavi-evidence/1": true,
+}
+
+// Result is the outcome of verifying one log.
+type Result struct {
+	Status Status `json:"status"`
+	// Records counts the verified records (damaged fragments excluded).
+	Records int `json:"records"`
+	// DamagedLines lists 1-based line numbers of unparseable fragments.
+	DamagedLines []int `json:"damaged_lines"`
+	// Reason and Line are set only when Status is INVALID.
+	Reason string `json:"reason,omitempty"`
+	Line   int    `json:"line,omitempty"`
+}
+
+// Keyring maps a key_id (§6) to the public key that bears it. Verification
+// accepts several keys so that a log spanning a key rotation still verifies
+// end to end.
+type Keyring map[string]ed25519.PublicKey
+
+// NewKeyring indexes the given public keys by their key_id.
+func NewKeyring(keys ...ed25519.PublicKey) Keyring {
+	kr := make(Keyring, len(keys))
+	for _, k := range keys {
+		kr[KeyID(k)] = k
+	}
+	return kr
+}
+
+// KeyID derives the §6 key identifier: the first 16 hex characters of the
+// SHA-256 of the 32 raw public-key bytes.
+func KeyID(pub ed25519.PublicKey) string {
+	sum := sha256.Sum256(pub)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// ParsePublicKey reads the §6 public key file format: 64 lowercase hex
+// characters, surrounding whitespace ignored.
+func ParsePublicKey(data []byte) (ed25519.PublicKey, error) {
+	s := strings.TrimSpace(string(data))
+	if len(s) != 2*ed25519.PublicKeySize {
+		return nil, fmt.Errorf("public key must be %d hex characters, got %d", 2*ed25519.PublicKeySize, len(s))
+	}
+	if s != strings.ToLower(s) {
+		return nil, errors.New("public key must be lowercase hex")
+	}
+	raw, err := hex.DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("public key: %w", err)
+	}
+	return ed25519.PublicKey(raw), nil
+}
+
+// Verify runs the §9 algorithm over a log and reports the verdict. The error
+// return covers only I/O failures reading r; a log that fails verification
+// is a Result, not an error.
+func Verify(r io.Reader, keys Keyring) (Result, error) {
+	res := Result{Status: StatusValid, DamagedLines: []int{}}
+	expectedPrev := genesisPrevHash
+	expectedSeq := int64(1)
+
+	br := bufio.NewReader(r)
+	for lineNo := 1; ; lineNo++ {
+		raw, err := br.ReadBytes('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return Result{}, fmt.Errorf("read log: %w", err)
+		}
+		if len(raw) == 0 {
+			break
+		}
+		// A final fragment with no terminator is the torn tail of §2: the
+		// writer crashed mid-line. Signed content cannot be altered or
+		// removed this way, so it is damage, never tampering.
+		if !bytes.HasSuffix(raw, []byte("\n")) {
+			res.DamagedLines = append(res.DamagedLines, lineNo)
+			break
+		}
+		line := raw[:len(raw)-1]
+
+		rec, perr := parseRecord(line)
+		if perr != nil {
+			res.DamagedLines = append(res.DamagedLines, lineNo)
+			continue // the chain does not advance across damage
+		}
+		if reason := verifyRecord(rec, line, keys, expectedPrev, expectedSeq); reason != "" {
+			res.Status = StatusInvalid
+			res.Reason = reason
+			res.Line = lineNo
+			return res, nil
+		}
+
+		sum := sha256.Sum256(line)
+		expectedPrev = "sha256:" + hex.EncodeToString(sum[:])
+		expectedSeq++
+		res.Records++
+	}
+
+	if len(res.DamagedLines) > 0 {
+		res.Status = StatusValidDamage
+	}
+	return res, nil
+}
+
+// verifyRecord applies the per-record assertions of §9 in the order the
+// specification lists them, returning "" when the record is sound and a
+// human-readable reason otherwise.
+func verifyRecord(rec map[string]any, line []byte, keys Keyring, expectedPrev string, expectedSeq int64) string {
+	schema, ok := rec["schema"].(string)
+	if !ok || !supportedSchemas[schema] {
+		return fmt.Sprintf("unsupported schema %q", schema)
+	}
+
+	// canonicalize also enforces the §4 integer restriction, so a
+	// fractional or oversized number is reported here rather than
+	// surfacing later as an opaque byte mismatch.
+	canon, err := canonicalize(rec)
+	if err != nil {
+		return err.Error()
+	}
+	if len(canon) > maxCanonicalBytes {
+		return fmt.Sprintf("canonical size %d exceeds the %d byte limit", len(canon), maxCanonicalBytes)
+	}
+	if !bytes.Equal(canon, line) {
+		return "stored bytes are not the canonical serialization of the record"
+	}
+
+	// canonicalize above already proved every number in the record obeys
+	// §4, so the only way seq can fail here is by being absent or not a
+	// number at all; both fold into one branch rather than leaving an
+	// untestable one behind.
+	seq, ok := integerField(rec, "seq")
+	if !ok {
+		return "seq is missing or not an integer"
+	}
+	if seq != expectedSeq {
+		return fmt.Sprintf("seq %d, want %d", seq, expectedSeq)
+	}
+
+	prev, ok := rec["prev_hash"].(string)
+	if !ok || prev != expectedPrev {
+		return fmt.Sprintf("prev_hash %s, want %s", prev, expectedPrev)
+	}
+
+	return verifySignature(rec, keys)
+}
+
+// verifySignature performs the last two assertions of §9: select the public
+// key by key_id, then check the ed25519 signature over the canonical form of
+// the record with sig removed.
+func verifySignature(rec map[string]any, keys Keyring) string {
+	sig, ok := rec["sig"].(map[string]any)
+	if !ok {
+		return "sig is missing or not an object"
+	}
+	alg, ok := sig["alg"].(string)
+	if !ok || alg != "ed25519" {
+		return fmt.Sprintf("unsupported signature algorithm %q", alg)
+	}
+	keyID, ok := sig["key_id"].(string)
+	if !ok {
+		return "sig.key_id is missing or not a string"
+	}
+	pub, ok := keys[keyID]
+	if !ok {
+		return fmt.Sprintf("no public key in the keyring for key_id %s", keyID)
+	}
+	sigB64, ok := sig["sig_b64"].(string)
+	if !ok {
+		return "sig.sig_b64 is missing or not a string"
+	}
+	rawSig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		return "sig_b64 is not valid base64"
+	}
+	if len(rawSig) != ed25519.SignatureSize {
+		return fmt.Sprintf("signature is %d bytes, want %d", len(rawSig), ed25519.SignatureSize)
+	}
+
+	// The signed message is the canonical form with sig removed entirely —
+	// absent, not null (§6).
+	unsigned := make(map[string]any, len(rec))
+	for k, v := range rec {
+		if k != "sig" {
+			unsigned[k] = v
+		}
+	}
+	// unsigned holds a subset of values the earlier canonicalize call
+	// already accepted, so its error is unreachable; it shares the failure
+	// branch instead of forming a path no test could ever exercise.
+	msg, err := canonicalize(unsigned)
+	if err != nil || !ed25519.Verify(pub, msg, rawSig) {
+		return "signature does not verify"
+	}
+	return ""
+}
+
+// integerField reads a §4 integer out of a decoded record. It reports false
+// when the field is missing, is not a number, or is not a legal integer.
+func integerField(rec map[string]any, name string) (int64, bool) {
+	num, ok := rec[name].(json.Number)
+	if !ok {
+		return 0, false
+	}
+	v, err := integerValue(num)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}

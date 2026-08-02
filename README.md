@@ -106,6 +106,16 @@ $ probavi evidence verify --log evidence.jsonl --key probavi.key.pub
 
 That `VALID` is the product: anyone holding only the log file and your public key can reproduce it, fully offline.
 
+They do not have to take Probavi's word for it either. [`spec/evidence`](spec/evidence) is a second, independent verifier — written from [the format specification](docs/evidence-schema.md) alone, no dependencies, and in a separate Go module so it *cannot* import Probavi's own evidence code. Install it without installing Probavi:
+
+```console
+$ go install github.com/aafeher/probavi/spec/evidence/cmd/probavi-evidence-verify@latest
+$ probavi-evidence-verify --log evidence.jsonl --key probavi.key.pub
+{"status":"VALID","records":1,"damaged_lines":[]}
+```
+
+Verification is free permanently and is never part of a commercial offering — paywalling it would destroy the thing the evidence is for.
+
 <details>
 <summary>No backup at hand? Generate a demo dump.</summary>
 

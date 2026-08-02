@@ -15,6 +15,13 @@ import (
 
 var updateGolden = flag.Bool("update", false, "rewrite golden files")
 
+// examplesDir holds the published worked-example logs and the signer's public
+// key (evidence-schema.md §11). They live beside the JSON Schema under docs/
+// rather than in this package's testdata/ so that third parties — and the
+// independent verifier in spec/evidence — can use them as conformance vectors
+// without reaching into internal/.
+const examplesDir = "../../docs/schemas/evidence/examples"
+
 // buildLog writes the three sample records through a real Store and returns
 // the log path. Fixed seed + fixed timestamps make the bytes deterministic.
 func buildLog(t *testing.T) string {
@@ -93,10 +100,10 @@ func TestGoldenLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	golden := filepath.Join("testdata", "log_v1.golden")
+	golden := filepath.Join(examplesDir, "log_v1.jsonl")
 	if *updateGolden {
-		if err := os.MkdirAll("testdata", 0o755); err != nil {
-			t.Fatalf("mkdir testdata: %v", err)
+		if err := os.MkdirAll(examplesDir, 0o755); err != nil {
+			t.Fatalf("mkdir examples: %v", err)
 		}
 		if err := os.WriteFile(golden, got, 0o644); err != nil {
 			t.Fatalf("write golden: %v", err)
@@ -111,13 +118,13 @@ func TestGoldenLog(t *testing.T) {
 	}
 }
 
-// TestFrozenV0LogVerifies pins schema-version support forever: log_v0.golden
+// TestFrozenV0LogVerifies pins schema-version support forever: log_v0.jsonl
 // was written by the probavi-evidence/0 implementation and is byte-frozen —
 // it has no updater and MUST never be regenerated. Records already written
 // under a published version stay verifiable for the lifetime of the product
 // (evidence-schema.md §10).
 func TestFrozenV0LogVerifies(t *testing.T) {
-	f, err := os.Open(filepath.Join("testdata", "log_v0.golden"))
+	f, err := os.Open(filepath.Join(examplesDir, "log_v0.jsonl"))
 	if err != nil {
 		t.Fatalf("open frozen v0 log: %v", err)
 	}
@@ -136,20 +143,20 @@ func TestFrozenV0LogVerifies(t *testing.T) {
 }
 
 // TestWorkedExampleVerifiesWithCommittedKey completes the evidence-schema.md
-// §11 worked example: the committed 3-record golden logs verify offline with
-// only the committed public key file (testdata/signer.pub) — exactly the
+// §11 worked example: the committed 3-record example logs verify offline with
+// only the committed public key file (examples/signer.pub) — exactly the
 // position an external auditor is in. The key pair is the deterministic test
 // key (seed bytes 0x00…0x1f, see testSeed).
 func TestWorkedExampleVerifiesWithCommittedKey(t *testing.T) {
-	pub, err := LoadPublicKey(filepath.Join("testdata", "signer.pub"))
+	pub, err := LoadPublicKey(filepath.Join(examplesDir, "signer.pub"))
 	if err != nil {
 		t.Fatalf("load committed public key: %v", err)
 	}
 	if got, want := PublicKeyID(pub), testSigner().KeyID(); got != want {
 		t.Fatalf("committed key id %s does not match the golden signer %s", got, want)
 	}
-	for _, golden := range []string{"log_v0.golden", "log_v1.golden"} {
-		f, err := os.Open(filepath.Join("testdata", golden))
+	for _, golden := range []string{"log_v0.jsonl", "log_v1.jsonl"} {
+		f, err := os.Open(filepath.Join(examplesDir, golden))
 		if err != nil {
 			t.Fatalf("open %s: %v", golden, err)
 		}
@@ -170,7 +177,7 @@ func TestWorkedExampleVerifiesWithCommittedKey(t *testing.T) {
 // guarantees: a log started under v0 keeps its chain when the writer starts
 // emitting v1 records mid-file.
 func TestChainContinuesAcrossSchemaVersions(t *testing.T) {
-	v0, err := os.ReadFile(filepath.Join("testdata", "log_v0.golden"))
+	v0, err := os.ReadFile(filepath.Join(examplesDir, "log_v0.jsonl"))
 	if err != nil {
 		t.Fatalf("read frozen v0 log: %v", err)
 	}
