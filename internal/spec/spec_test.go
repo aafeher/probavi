@@ -121,8 +121,8 @@ func TestEvidenceGoldenLogsValidate(t *testing.T) {
 	c, _ := newCompiler(t)
 	record := compile(t, c, "evidence/record.json")
 	for _, golden := range []string{
-		"../evidence/testdata/log_v0.golden",
-		"../evidence/testdata/log_v1.golden",
+		"../../docs/schemas/evidence/examples/log_v0.jsonl",
+		"../../docs/schemas/evidence/examples/log_v1.jsonl",
 	} {
 		for i, line := range goldenLines(t, golden) {
 			if err := record.Validate(parseJSON(t, line)); err != nil {
@@ -163,7 +163,7 @@ func TestEvidenceRecordViolations(t *testing.T) {
 	record := compile(t, c, "evidence/record.json")
 	// Line 1 of the v1 golden is a pass record (error null); line 2 is a
 	// fail record with an error object.
-	lines := goldenLines(t, "../evidence/testdata/log_v1.golden")
+	lines := goldenLines(t, "../../docs/schemas/evidence/examples/log_v1.jsonl")
 
 	cases := []struct {
 		name   string

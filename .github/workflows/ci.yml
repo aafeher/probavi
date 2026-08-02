@@ -40,6 +40,15 @@ jobs:
         run: |
           go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
           golangci-lint run --timeout 5m
+      - name: spec/evidence module (separate module, same gates)
+        # spec/evidence is a separate Go module so that the independent
+        # verifier physically cannot import internal/evidence. That also
+        # puts it outside the root module's ./... — it needs its own
+        # invocation of every gate, or it would silently go unchecked.
+        working-directory: spec/evidence
+        run: |
+          go mod tidy -diff
+          golangci-lint run --timeout 5m ./...
 
   test:
     name: Unit tests (race, coverage ratchet)
@@ -67,6 +76,22 @@ jobs:
             echo "::error::coverage ${total}% fell below the committed floor ${floor}% — add tests; never lower the floor"
             exit 1
           fi
+      - name: spec/evidence — independent verifier
+        # The whole value of this module is that it agrees with the core
+        # about the published example logs without sharing a line of code
+        # with it. It is a trust-core component, so it carries the near-100%
+        # bar of AGENTS.md §3.1 rather than the repository-wide floor.
+        working-directory: spec/evidence
+        run: |
+          go build ./...
+          go test -race -coverprofile=cover.out .
+          total=$(go tool cover -func=cover.out | awk '/^total:/ {sub(/%/, "", $3); print $3}')
+          echo "spec/evidence coverage: ${total}%"
+          if ! awk -v t="$total" 'BEGIN {exit (t + 0 >= 100) ? 0 : 1}'; then
+            echo "::error::spec/evidence is the independent verifier — it holds at 100% statement coverage"
+            exit 1
+          fi
+          go test -race ./cmd/...
 
   integration:
     name: Integration tests (real Docker)
@@ -145,3 +170,4 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+          (cd spec/evidence && govulncheck ./...)

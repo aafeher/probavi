@@ -258,7 +258,8 @@ all secrets it holds; truncation limits (§3) apply after redaction.
 
 `probavi evidence verify --log <file> --key <pub> [--key <pub>…]`
 implements exactly this algorithm; independent implementations need nothing
-else:
+else. That claim is not left as an assertion: `spec/evidence` is a second
+implementation written from this document alone (§12).
 
 ```text
 expected_prev ← "sha256:" + 64×"0"
@@ -321,14 +322,57 @@ further change to this schema is a version bump (§10).
       golden-file tests plus mutation samples (`internal/spec`).
       Done 2026-08-01.
 - [x] Worked example: byte-exact 3-record logs for both published versions
-      (`internal/evidence/testdata/log_v0.golden`, `log_v1.golden`) with the
-      signer's public key committed alongside (`testdata/signer.pub`; the
-      key pair is the deterministic test key with seed bytes 0x00…0x1f). CI
-      verifies both logs offline with only the committed public key.
-      Done 2026-08-01.
+      (`docs/schemas/evidence/examples/log_v0.jsonl`, `log_v1.jsonl`) with
+      the signer's public key committed alongside (`examples/signer.pub`;
+      the key pair is the deterministic test key with seed bytes 0x00…0x1f).
+      CI verifies both logs offline with only the committed public key.
+      Done 2026-08-01; moved out of `internal/` and published as conformance
+      vectors 2026-08-02 (§12).
+
+## 12. Independent verification
+
+This section is normative about *availability*, not about the format: it
+records a standing commitment, and nothing here changes a byte of §1–§11.
+
+Verification of the evidence format is permanently free and permanently
+independent of the Probavi product:
+
+- **The specification is this document**, versioned as
+  `probavi-evidence/<major>` on its own cadence, independent of the Probavi
+  binary's version. The machine-readable JSON Schema for every published
+  version lives at `docs/schemas/evidence/record.json`.
+- **The conformance vectors are published**, not internal test fixtures:
+  `docs/schemas/evidence/examples/` holds byte-frozen logs for every
+  published schema version plus the public key that signed them. The signing
+  key is the deterministic test key and is published deliberately, so anyone
+  can reproduce the logs. It is a test vector and MUST NOT be used
+  operationally.
+- **A reference verifier ships as a standalone tool**, `spec/evidence`, a
+  separate Go module with no dependencies and no code shared with the
+  Probavi core. Being a separate module, it *cannot* import
+  `internal/evidence` — the independence is enforced by the Go toolchain
+  rather than by convention. It was written from this document alone.
+
+The two implementations are held together by the published examples rather
+than by shared code: the core's tests pin that it emits exactly those bytes,
+and the verifier's tests pin that an implementation which has never seen the
+core accepts exactly those bytes. A divergence turns one of the two suites
+red. This is the same technique the adapter protocol uses in `internal/conformance`,
+applied to the format that carries the product's actual claim.
+
+A third-party implementation is expected to need nothing beyond this
+document; where the reference verifier found the text worth re-reading, the
+notes are collected in `spec/evidence/README.md`.
 
 ## Changelog
 
+- Editorial (2026-08-02, no format change): §12 added, recording that
+  verification is permanently free and independently implemented. The worked
+  example moved from `internal/evidence/testdata/` to
+  `docs/schemas/evidence/examples/` so that it is reachable as a published
+  conformance vector — the bytes are unchanged and CI proves it. No schema
+  version bump: no field, no serialization rule and no record byte is
+  affected.
 - v1 (2026-08-01): added `drill.pitr_target` — nullable, the resolved
   absolute point-in-time recovery target of PITR drills. Rationale: a PITR
   drill's compliance claim is "restorable *to instant T*"; without T in the

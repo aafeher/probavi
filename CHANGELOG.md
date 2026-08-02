@@ -13,6 +13,23 @@ always called out explicitly.
 
 ### Added
 
+- Independent evidence verifier (`spec/evidence`, evidence schema §12).
+  Verifying a Probavi evidence log no longer depends on Probavi: a
+  second implementation of the format, written from
+  `docs/evidence-schema.md` alone, ships as the dependency-free
+  `probavi-evidence-verify` tool, installable on its own with
+  `go install github.com/aafeher/probavi/spec/evidence/cmd/probavi-evidence-verify@latest`.
+  It lives in a separate Go module, so the toolchain — not convention —
+  forbids it importing Probavi's own evidence code. Until now the only
+  thing checking the hash chain and the signatures was the code that
+  wrote them; both implementations now agree on every published schema
+  version and on tampered input, down to the failing line number. The
+  worked example moved from `internal/evidence/testdata/` to
+  `docs/schemas/evidence/examples/` and is published as a conformance
+  vector anyone can verify against. **No evidence-format change:** no
+  field, serialization rule, or record byte is affected, and the frozen
+  example logs are byte-identical.
+
 - Internationalized CLI output (spec docs/i18n.md): the usage text and
   CLI diagnostics are now localizable, with Hungarian (`hu`) as the
   first national language. The locale comes from
