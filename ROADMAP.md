@@ -78,7 +78,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] Portuguese (`pt`) **Complete 2026-08-02: `internal/i18n/locales/pt.json`, all 76 messages, §4 gates green; European Portuguese (registo / ficheiros / contentores, AO90), drill → simulacro, evidence terms as evidência compounds (registo de evidência / log de evidências / esquema de evidência).**
   - [x] Czech (`cs`) **Complete 2026-08-02: `internal/i18n/locales/cs.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → cvičení, evidence terms as důkaz compounds (důkazní záznam / důkazní log / schéma důkazů), „pole X je povinné" for gender-safe required-field lines.**
   - [x] Swedish (`sv`) **Complete 2026-08-02: `internal/i18n/locales/sv.json`, all 76 messages, §4 gates green; informal imperative, drill → övning, outcome → utfall, evidence terms as bevis compounds (bevispost / bevislogg / bevisschema).**
-  - [ ] Bulgarian (`bg`)
+  - [x] Bulgarian (`bg`) **Complete 2026-08-02: `internal/i18n/locales/bg.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → учение, evidence terms as доказателство compounds (доказателствен запис / доказателствен журнал / схема на доказателствата), „полето X е задължително" for gender-safe required-field lines.**
   - [ ] Danish (`da`)
   - [ ] Finnish (`fi`)
   - [ ] Slovak (`sk`)
