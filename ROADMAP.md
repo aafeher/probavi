@@ -68,27 +68,27 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] i18n foundation + Hungarian (`hu`) — the first national language proves the pipeline end to end. **Complete 2026-08-02: `internal/i18n`, usage + CLI diagnostics translated, gates green.**
   - [x] Translate config-validation diagnostics (thread the translator into `internal/config`). **Complete 2026-08-02: `Load`/`LoadGameDay` take the injected translator, all 57 validation messages moved to the package's explicit registry (`config.Messages()`) and joined the CI gates; Hungarian shipped in the same change. YAML-unmarshaling internals (durations, scalars, syntax annotations) stay English — no translator can reach them.**
   - [x] German (`de`) **Complete 2026-08-02: `internal/i18n/locales/de.json`, all 76 messages, §4 gates green; Sie-form throughout, evidence terms rendered as Nachweis compounds (record → Nachweisdatensatz, log → Nachweisprotokoll, schema → Nachweisschema).**
-  - [ ] French (`fr`)
-  - [ ] Italian (`it`)
-  - [ ] Spanish (`es`)
-  - [ ] Polish (`pl`)
-  - [ ] Romanian (`ro`)
-  - [ ] Dutch (`nl`)
-  - [ ] Greek (`el`)
-  - [ ] Portuguese (`pt`)
-  - [ ] Czech (`cs`)
-  - [ ] Swedish (`sv`)
-  - [ ] Bulgarian (`bg`)
-  - [ ] Danish (`da`)
-  - [ ] Finnish (`fi`)
-  - [ ] Slovak (`sk`)
-  - [ ] Croatian (`hr`)
-  - [ ] Lithuanian (`lt`)
-  - [ ] Slovenian (`sl`)
-  - [ ] Latvian (`lv`)
-  - [ ] Estonian (`et`)
-  - [ ] Maltese (`mt`)
-  - [ ] Irish (`ga`)
+  - [x] French (`fr`) **Complete 2026-08-02: `internal/i18n/locales/fr.json`, all 76 messages, §4 gates green; vous-form, drill → exercice, evidence terms as preuve compounds (record → enregistrement de preuve, log → journal de preuves, schema → schéma de preuve).**
+  - [x] Italian (`it`) **Complete 2026-08-02: `internal/i18n/locales/it.json`, all 76 messages, §4 gates green; impersonal-infinitive instructions, drill → esercitazione, evidence terms as evidenza compounds (record di evidenza / registro delle evidenze / schema delle evidenze).**
+  - [x] Spanish (`es`) **Complete 2026-08-02: `internal/i18n/locales/es.json`, all 76 messages, §4 gates green; usted-form, drill → simulacro, check → comprobación, evidence terms as evidencia compounds (registro de evidencia / log de evidencias / esquema de evidencia).**
+  - [x] Polish (`pl`) **Complete 2026-08-02: `internal/i18n/locales/pl.json`, all 76 messages, §4 gates green; impersonal GNOME-style register, drill → ćwiczenie, check → kontrola, evidence terms as dowód compounds (rekord dowodowy / dziennik dowodów / schemat dowodów), „pole X jest wymagane" for gender-safe required-field lines.**
+  - [x] Romanian (`ro`) **Complete 2026-08-02: `internal/i18n/locales/ro.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → exercițiu, evidence terms as dovadă compounds (înregistrare de dovadă / jurnal de dovezi / schema dovezilor).**
+  - [x] Dutch (`nl`) **Complete 2026-08-02: `internal/i18n/locales/nl.json`, all 76 messages, §4 gates green; informal imperative, drill → oefening, evidence terms as bewijs compounds (bewijsrecord / bewijslog / bewijsschema), Dutch orthography back-up.**
+  - [x] Greek (`el`) **Complete 2026-08-02: `internal/i18n/locales/el.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → άσκηση, adapter → προσαρμογέας, evidence terms as τεκμήριο compounds (εγγραφή τεκμηρίου / αρχείο καταγραφής τεκμηρίων / σχήμα τεκμηρίων).**
+  - [x] Portuguese (`pt`) **Complete 2026-08-02: `internal/i18n/locales/pt.json`, all 76 messages, §4 gates green; European Portuguese (registo / ficheiros / contentores, AO90), drill → simulacro, evidence terms as evidência compounds (registo de evidência / log de evidências / esquema de evidência).**
+  - [x] Czech (`cs`) **Complete 2026-08-02: `internal/i18n/locales/cs.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → cvičení, evidence terms as důkaz compounds (důkazní záznam / důkazní log / schéma důkazů), „pole X je povinné" for gender-safe required-field lines.**
+  - [x] Swedish (`sv`) **Complete 2026-08-02: `internal/i18n/locales/sv.json`, all 76 messages, §4 gates green; informal imperative, drill → övning, outcome → utfall, evidence terms as bevis compounds (bevispost / bevislogg / bevisschema).**
+  - [x] Bulgarian (`bg`) **Complete 2026-08-02: `internal/i18n/locales/bg.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → учение, evidence terms as доказателство compounds (доказателствен запис / доказателствен журнал / схема на доказателствата), „полето X е задължително" for gender-safe required-field lines.**
+  - [x] Danish (`da`) **Complete 2026-08-02: `internal/i18n/locales/da.json`, all 76 messages, §4 gates green; informal imperative, drill → øvelse, outcome → udfald, evidence terms as bevis compounds (bevispost / bevislog / bevisskema).**
+  - [x] Finnish (`fi`) **Complete 2026-08-02: `internal/i18n/locales/fi.json`, all 76 messages, §4 gates green; informal imperative, drill → harjoitus, adapter → sovitin, evidence terms as todiste compounds (todistetietue / todisteloki / todisteskeema).**
+  - [x] Slovak (`sk`) **Complete 2026-08-02: `internal/i18n/locales/sk.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → cvičenie, evidence terms as dôkaz compounds (dôkazový záznam / dôkazový log / schéma dôkazov), „pole X je povinné" for gender-safe required-field lines.**
+  - [x] Croatian (`hr`) **Complete 2026-08-02: `internal/i18n/locales/hr.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → vježba, outcome → ishod, conformance → sukladnost, evidence terms as dokaz compounds (dokazni zapis / dokazni dnevnik / shema dokaza), „polje X je obavezno" for gender-safe required-field lines.**
+  - [x] Lithuanian (`lt`) **Complete 2026-08-02: `internal/i18n/locales/lt.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → pratybos (plurale tantum, „vienerios" numeral), evidence terms as įrodymas compounds (įrodymo įrašas / įrodymų žurnalas / įrodymų schema), „laukas X yra privalomas" for gender-safe required-field lines.**
+  - [x] Slovenian (`sl`) **Complete 2026-08-02: `internal/i18n/locales/sl.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → vaja, outcome → izid, correct dual in the two-member diagnostic (člana … si delita), evidence terms as dokaz compounds (dokazni zapis / dokazni dnevnik / shema dokazov).**
+  - [x] Latvian (`lv`) **Complete 2026-08-02: `internal/i18n/locales/lv.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → mācības (pluralia-tantum agreement throughout), sandbox → smilškaste, evidence terms as pierādījumu compounds (pierādījumu ieraksts / žurnāls / shēma), debitive mood in the "must be set" diagnostics.**
+  - [x] Estonian (`et`) **Complete 2026-08-02: `internal/i18n/locales/et.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → õppus, sandbox → liivakast, evidence terms as tõendi- compounds (tõendikirje / tõendilogi / tõendiskeem), the `on` config key quoted in diagnostics so it is not read as the verb "on".**
+  - [x] Maltese (`mt`) **Complete 2026-08-02: `internal/i18n/locales/mt.json`, all 76 messages, §4 gates green; singular imperative per Maltese localization convention, drill → eżerċizzju, evidence → evidenza (rekord / reġistru / skema ta' evidenza), definite-article assimilation checked throughout, invented -bbiltà abstractions avoided.**
+  - [x] Irish (`ga`) **Complete 2026-08-02: `internal/i18n/locales/ga.json`, all 76 messages, §4 gates green; drill → cleachtadh, adapter → cuibheoir, evidence → fianaise (taifead / loga / scéimre fianaise), diagnostics rephrased wherever an Irish preposition would have lenited or eclipsed a literal config key.**
 - [ ] Evaluate hosted/managed offering (business decision, out of scope for the OSS core).
 
 ## Deliberate non-goals (all phases)
