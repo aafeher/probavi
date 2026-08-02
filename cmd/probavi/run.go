@@ -22,6 +22,7 @@ import (
 	"github.com/aafeher/probavi/internal/core"
 	"github.com/aafeher/probavi/internal/evidence"
 	"github.com/aafeher/probavi/internal/metrics"
+	"github.com/aafeher/probavi/internal/notify"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
 	"github.com/aafeher/probavi/internal/sandbox/k8s"
 	"github.com/aafeher/probavi/internal/sandbox/remotehost"
@@ -66,7 +67,7 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 
-	drill, evidencePath, cleanup, err := wireDrill(*configPath, logger)
+	drill, notifier, evidencePath, cleanup, err := wireDrill(*configPath, logger)
 	if err != nil {
 		fmt.Fprintf(stderr, "probavi run: %v\n", err)
 		return exitUsage
@@ -99,6 +100,17 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 	if err := json.NewEncoder(stdout).Encode(summarize(rec, evidencePath)); err != nil {
 		fmt.Fprintf(stderr, "probavi run: encode summary: %v\n", err)
 	}
+	if notifier != nil {
+		// Notifications are observability, not evidence: they run on their
+		// own budget — deliberately not derived from the drill context, so a
+		// cancelled or timed-out drill still notifies — and failures are
+		// loud but never change the exit code.
+		nctx, ncancel := context.WithTimeout(context.Background(), notify.Budget)
+		if nerr := notifier.Send(nctx, rec); nerr != nil {
+			logger.Error("deliver notifications", "err", nerr)
+		}
+		ncancel()
+	}
 	switch rec.Outcome {
 	case evidence.OutcomePass:
 		return exitPass
@@ -109,24 +121,33 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// wireDrill builds the object graph for one drill run: config, evidence
-// store, adapter runner, sandbox provider.
-func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, string, func(), error) {
+// wireDrill builds the object graph for one drill run: config, notifier,
+// evidence store, adapter runner, sandbox provider. The notifier is wired
+// first so an unresolvable webhook environment variable aborts before any
+// long-running work.
+func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, *notify.Notifier, string, func(), error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, "", nil, err
+	}
+	var notifier *notify.Notifier
+	if cfg.Notify != nil {
+		notifier, err = notify.New(cfg.Notify, version, logger)
+		if err != nil {
+			return nil, nil, "", nil, err
+		}
 	}
 	provider, err := sandboxProvider(cfg.Sandbox.Provider, cfg.Sandbox.Params, logger)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, "", nil, err
 	}
 	signer, err := evidence.LoadSigner(cfg.Evidence.SignKey)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, "", nil, err
 	}
 	store, err := evidence.Open(cfg.Evidence.Path, signer, logger)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, nil, "", nil, err
 	}
 	password := randomHex(16)
 	runner, err := adapter.New(cfg.Target.Adapter, logger, &adapter.Options{
@@ -137,7 +158,7 @@ func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, string, fun
 		if cerr := store.Close(); cerr != nil {
 			logger.Error("close evidence store", "err", cerr)
 		}
-		return nil, "", nil, err
+		return nil, nil, "", nil, err
 	}
 	drill := &core.Drill{
 		Config:          cfg,
@@ -153,7 +174,7 @@ func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, string, fun
 			logger.Error("close evidence store", "err", cerr)
 		}
 	}
-	return drill, cfg.Evidence.Path, cleanup, nil
+	return drill, notifier, cfg.Evidence.Path, cleanup, nil
 }
 
 func summarize(rec *evidence.Record, evidencePath string) runSummary {

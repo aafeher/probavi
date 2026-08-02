@@ -18,8 +18,9 @@ const (
 	idBase     = "https://probavi.dev/schemas/"
 
 	// schemaFileCount guards against a schema file silently dropping out of
-	// the walk (12 adapter shapes + the evidence record).
-	schemaFileCount = 13
+	// the walk (12 adapter shapes + the evidence record + the notification
+	// payload).
+	schemaFileCount = 14
 )
 
 // newCompiler registers every schema file under its canonical $id so that
@@ -220,6 +221,70 @@ func TestEvidenceRecordViolations(t *testing.T) {
 			tc.mutate(t, m)
 			if err := record.Validate(doc); err == nil {
 				t.Error("mutated record validates, want rejection")
+			}
+		})
+	}
+}
+
+// TestNotificationGoldenValidates holds the notification payload schema to
+// the byte-frozen golden payloads of internal/notify.
+func TestNotificationGoldenValidates(t *testing.T) {
+	c, _ := newCompiler(t)
+	payload := compile(t, c, "notification/payload.json")
+	for i, line := range goldenLines(t, "../notify/testdata/payload.golden") {
+		if err := payload.Validate(parseJSON(t, line)); err != nil {
+			t.Errorf("payload.golden line %d does not validate: %v", i+1, err)
+		}
+	}
+}
+
+// TestNotificationPayloadViolations proves the payload schema constrains:
+// each mutation of a valid golden payload must be rejected.
+func TestNotificationPayloadViolations(t *testing.T) {
+	c, _ := newCompiler(t)
+	payload := compile(t, c, "notification/payload.json")
+	// Line 1 of the golden is a pass payload (error null); line 2 is a fail
+	// payload with an error object.
+	lines := goldenLines(t, "../notify/testdata/payload.golden")
+
+	cases := []struct {
+		name   string
+		line   int
+		mutate func(t *testing.T, m map[string]any)
+	}{
+		{"unpublished schema version", 0, func(_ *testing.T, m map[string]any) { m["schema"] = "probavi-notification/2" }},
+		{"unknown event", 0, func(_ *testing.T, m map[string]any) { m["event"] = "drill.started" }},
+		{"unknown top-level field", 0, func(_ *testing.T, m map[string]any) { m["comment"] = "forged" }},
+		{"missing probavi_version", 0, func(_ *testing.T, m map[string]any) { delete(m, "probavi_version") }},
+		{"seq zero", 0, func(_ *testing.T, m map[string]any) { m["seq"] = 0 }},
+		{"ts without millisecond precision", 0, func(_ *testing.T, m map[string]any) { m["ts"] = "2026-08-01T03:10:02Z" }},
+		{"config_hash not sha256", 0, func(t *testing.T, m map[string]any) {
+			child(t, m, "drill")["config_hash"] = "md5:abc"
+		}},
+		{"uppercase adapter name", 0, func(_ *testing.T, m map[string]any) { m["adapter"] = "Postgres" }},
+		{"unknown outcome", 0, func(_ *testing.T, m map[string]any) { m["outcome"] = "ok" }},
+		{"fractional timing", 0, func(t *testing.T, m map[string]any) {
+			child(t, m, "timings_ms")["restore"] = 190.5
+		}},
+		{"pass with error object", 1, func(_ *testing.T, m map[string]any) { m["outcome"] = "pass" }},
+		{"fail with null error", 1, func(_ *testing.T, m map[string]any) { m["error"] = nil }},
+		{"error code outside registry", 1, func(t *testing.T, m map[string]any) {
+			child(t, m, "error")["code"] = "mystery"
+		}},
+		{"multi-line error message", 1, func(t *testing.T, m map[string]any) {
+			child(t, m, "error")["message"] = "line one\nline two"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := parseJSON(t, lines[tc.line])
+			m, ok := doc.(map[string]any)
+			if !ok {
+				t.Fatal("golden line is not an object")
+			}
+			tc.mutate(t, m)
+			if err := payload.Validate(doc); err == nil {
+				t.Error("mutated payload validates, want rejection")
 			}
 		})
 	}

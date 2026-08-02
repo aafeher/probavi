@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,6 +33,7 @@ type Config struct {
 	Checks   []Check  `yaml:"checks"`
 	Evidence Evidence `yaml:"evidence"`
 	Metrics  *Metrics `yaml:"metrics"`
+	Notify   *Notify  `yaml:"notify"`
 
 	// Hash is "sha256:<hex>" over the exact file bytes as read — the value
 	// evidence records carry as drill.config_hash.
@@ -107,6 +109,29 @@ type Metrics struct {
 	PrometheusTextfile string `yaml:"prometheus_textfile"`
 }
 
+// Notify configures optional drill-completion notifications
+// (docs/notifications.md).
+type Notify struct {
+	Webhooks []NotifyWebhook `yaml:"webhooks"`
+}
+
+// NotifyWebhook is one webhook destination. Exactly one of URL (a
+// non-secret literal) or URLEnv (the name of an environment variable
+// holding the URL) must be set — token-bearing URLs are credentials and
+// belong in the environment, never in config values.
+type NotifyWebhook struct {
+	URL       string   `yaml:"url"`
+	URLEnv    string   `yaml:"url_env"`
+	SecretEnv string   `yaml:"secret_env"`
+	On        []string `yaml:"on"`
+}
+
+// notifyOutcomes are the outcome names a webhook's on filter may list
+// (docs/notifications.md §2); they mirror the evidence outcome values.
+var notifyOutcomes = map[string]bool{
+	"pass": true, "fail": true, "error": true, "cancelled": true,
+}
+
 // Load reads, parses, and validates a drill configuration. The returned
 // error is human-oriented: syntax errors carry line/column context and an
 // annotated source excerpt; validation reports every problem found.
@@ -149,7 +174,51 @@ func (c *Config) validate() error {
 	if c.Metrics != nil && c.Metrics.PrometheusTextfile == "" {
 		p.add("metrics.prometheus_textfile is required when the metrics section is present")
 	}
+	if c.Notify != nil {
+		c.Notify.validate(&p)
+	}
 	return errors.Join(p...)
+}
+
+func (n *Notify) validate(p *problems) {
+	if len(n.Webhooks) == 0 {
+		p.add("notify.webhooks must list at least one webhook when the notify section is present")
+		return
+	}
+	for i := range n.Webhooks {
+		n.Webhooks[i].validate(p, i)
+	}
+}
+
+func (w *NotifyWebhook) validate(p *problems, i int) {
+	at := fmt.Sprintf("notify.webhooks[%d]", i)
+	switch {
+	case w.URL != "" && w.URLEnv != "":
+		p.add("%s: exactly one of url or url_env must be set, not both", at)
+	case w.URLEnv != "":
+		if !envNamePattern.MatchString(w.URLEnv) {
+			p.add("%s: url_env %q is not a valid environment variable name", at, w.URLEnv)
+		}
+	case w.URL != "":
+		if u, err := url.Parse(w.URL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			p.add("%s: url must be an absolute http(s) URL", at)
+		}
+	default:
+		p.add("%s: exactly one of url or url_env must be set (token-bearing URLs belong in url_env)", at)
+	}
+	if w.SecretEnv != "" && !envNamePattern.MatchString(w.SecretEnv) {
+		p.add("%s: secret_env %q is not a valid environment variable name", at, w.SecretEnv)
+	}
+	seen := make(map[string]bool, len(w.On))
+	for _, o := range w.On {
+		switch {
+		case !notifyOutcomes[o]:
+			p.add("%s: unknown outcome %q in on (supported: pass, fail, error, cancelled)", at, o)
+		case seen[o]:
+			p.add("%s: duplicate outcome %q in on", at, o)
+		}
+		seen[o] = true
+	}
 }
 
 func (t *Target) validate(p *problems) {

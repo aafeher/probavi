@@ -233,3 +233,41 @@ func TestUsageErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestRunRejectsUnresolvedWebhookEnv proves webhook environment variables
+// are resolved at wiring time: a drill with an unset url_env must abort
+// before any sandbox or adapter work, naming the missing variable.
+func TestRunRejectsUnresolvedWebhookEnv(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "drill.yaml")
+	cfg := `target:
+  name: notify-env-test
+  adapter: postgres
+  source:
+    kind: pgdump
+    path: /backups/test.dump
+sandbox:
+  provider: docker
+  timeout: 5m
+checks:
+  - builtin: service_healthy
+evidence:
+  path: ` + filepath.Join(dir, "evidence.jsonl") + `
+  sign_key: ` + filepath.Join(dir, "unused.key") + `
+notify:
+  webhooks:
+    - url_env: PROBAVI_TEST_UNSET_WEBHOOK_URL
+`
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("PROBAVI_TEST_UNSET_WEBHOOK_URL", "")
+
+	code, _, stderr := runCLI(t, "run", "--config", cfgPath)
+	if code != exitUsage {
+		t.Fatalf("exit %d, want %d (stderr: %s)", code, exitUsage, stderr)
+	}
+	if !strings.Contains(stderr, "PROBAVI_TEST_UNSET_WEBHOOK_URL") {
+		t.Errorf("stderr should name the missing variable, got: %s", stderr)
+	}
+}

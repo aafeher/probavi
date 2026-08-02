@@ -49,3 +49,16 @@ evidence:
 
 metrics:
   prometheus_textfile: /var/lib/node_exporter/probavi.prom
+
+# Optional webhook notifications (docs/notifications.md). One JSON POST per
+# webhook after the evidence record is signed; delivery failures are logged
+# but never change the drill's outcome or exit code.
+notify:
+  webhooks:
+    # Token-bearing URLs (Slack, healthchecks.io, …) are credentials: use
+    # url_env so they live in the environment, never in this file.
+    - url_env: PROBAVI_WEBHOOK_URL
+      secret_env: PROBAVI_WEBHOOK_SECRET   # optional HMAC signing (X-Probavi-Signature-256)
+      on: [fail, error]                    # default (no `on`): every outcome
+    # Non-secret internal endpoints may be literal.
+    - url: https://alerts.internal.example/probavi
