@@ -13,6 +13,17 @@ always called out explicitly.
 
 ### Added
 
+- Internationalized CLI output (spec docs/i18n.md): the usage text and
+  CLI diagnostics are now localizable, with Hungarian (`hu`) as the
+  first national language. The locale comes from
+  `PROBAVI_LANG → LC_ALL → LC_MESSAGES → LANG` (POSIX order, no new
+  flags or config keys); English remains the default and the fallback
+  for anything unknown. Catalogs are zero-dependency embedded JSON
+  keyed by the English text itself, and CI gates enforce completeness,
+  staleness, and format-verb parity per language — a partially
+  translated language cannot ship. Machine contracts are never
+  translated: evidence records, JSON summaries, the adapter protocol,
+  notification payloads, and structured logs stay English.
 - DR game-day orchestration (`probavi gameday`, spec docs/gameday.md):
   multi-database restore exercises in dependency order. A game-day
   config references normal drill files as members with `depends_on`

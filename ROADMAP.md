@@ -64,7 +64,31 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
 - [x] Bare-host SSH sandbox provider (no container runtime on the target). Spec first: it must answer how isolation, engine/tool version matching, ephemeral storage, and guaranteed cleanup survive without containers before any code — the current answer for remote drills is the docker provider over `DOCKER_HOST=ssh://…`. **Design spec approved 2026-08-01 (`docs/sandbox-bare-host.md`, transient systemd slice + per-drill workspace over the ssh CLI) with the §8 decisions: provider name `remotehost`, polkit privilege model, unix-socket-first, systemd ≥ 244. Implemented 2026-08-01 (`internal/sandbox/remotehost`): version probe at first contact, payloads as transient units in the slice as the drill user, host-scoped marker-based orphan sweep, target-side deadline-timer backstop; CI exercises the full lifecycle over loopback ssh with the shipped polkit rule.**
 - [x] DR game-day orchestration: multi-database, dependency-ordered restore drills. **Complete 2026-08-02 (`internal/gameday`, spec `docs/gameday.md`): `probavi gameday --config gameday.yaml` — members reference normal drill files (independently runnable from cron) with `depends_on` edges; each runs the full run pipeline and leaves its own signed record, the evidence schema untouched. Dependents of a failed member skip (cascading), independent branches always finish, execution is sequential by default with opt-in `max_parallel` (load-time guard: members sharing an evidence log cannot run concurrently). The JSON summary points at every record (seq + log path) and reports the service-level recovery wall clock; proven end to end against real Docker with a pass/fail/skip triad chained into one shared log.**
 - [x] Notification integrations (webhook first; Slack/email via webhook recipes). **Complete 2026-08-02 (`internal/notify`, spec `docs/notifications.md`): one JSON POST per configured webhook after the record is signed — payload `probavi-notification/1` with its own JSON Schema, optional GitHub-style HMAC signing, per-outcome `on` filter defaulting to every outcome so dead-man's-switch receivers work on silence. Token-bearing URLs live in the environment (`url_env`) and are redacted everywhere; delivery is bounded and never changes the drill verdict. Slack/email/healthchecks.io ship as recipes in the spec, as planned.**
-- [ ] Internationalization (i18n): make user-facing output — CLI messages, dashboard UI, audit report exports — localizable into any national language. English remains the canonical source language; evidence records, specs, and the codebase stay English-only (they are canonical machine/contract formats, not UI).
+- [ ] Internationalization (i18n): make user-facing output — CLI messages, dashboard UI, audit report exports — localizable into any national language. English remains the canonical source language; evidence records, specs, and the codebase stay English-only (they are canonical machine/contract formats, not UI). **In progress — approach decided 2026-08-02 (spec `docs/i18n.md`): zero-dependency embedded JSON catalogs keyed by the English text itself, locale from `PROBAVI_LANG → LC_ALL → LC_MESSAGES → LANG`, CI gates for completeness / staleness / format-verb parity; machine outputs and logs are never translated. Languages land one by one — Hungarian first, then the official EU languages in native-speaker order:**
+  - [x] i18n foundation + Hungarian (`hu`) — the first national language proves the pipeline end to end. **Complete 2026-08-02: `internal/i18n`, usage + CLI diagnostics translated, gates green.**
+  - [ ] Translate config-validation diagnostics (thread the translator into `internal/config`; ~60 messages whose tests currently pin English).
+  - [ ] German (`de`)
+  - [ ] French (`fr`)
+  - [ ] Italian (`it`)
+  - [ ] Spanish (`es`)
+  - [ ] Polish (`pl`)
+  - [ ] Romanian (`ro`)
+  - [ ] Dutch (`nl`)
+  - [ ] Greek (`el`)
+  - [ ] Portuguese (`pt`)
+  - [ ] Czech (`cs`)
+  - [ ] Swedish (`sv`)
+  - [ ] Bulgarian (`bg`)
+  - [ ] Danish (`da`)
+  - [ ] Finnish (`fi`)
+  - [ ] Slovak (`sk`)
+  - [ ] Croatian (`hr`)
+  - [ ] Lithuanian (`lt`)
+  - [ ] Slovenian (`sl`)
+  - [ ] Latvian (`lv`)
+  - [ ] Estonian (`et`)
+  - [ ] Maltese (`mt`)
+  - [ ] Irish (`ga`)
 - [ ] Evaluate hosted/managed offering (business decision, out of scope for the OSS core).
 
 ## Deliberate non-goals (all phases)

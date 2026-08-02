@@ -14,6 +14,7 @@ import (
 
 	"github.com/aafeher/probavi/internal/adapter"
 	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/aafeher/probavi/internal/i18n"
 )
 
 // Exit codes. Verify verdicts follow evidence-schema.md §9; exitUsage
@@ -26,62 +27,69 @@ const (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	tr, err := i18n.New(i18n.Detect(os.Getenv))
+	if err != nil {
+		// A broken embedded catalog is a build defect; fall back to the
+		// canonical English loudly, never crash a cron drill over prose.
+		fmt.Fprintf(os.Stderr, "probavi: %v\n", err)
+		tr = i18n.English()
+	}
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, tr))
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	if len(args) == 0 {
-		usage(stderr)
+		usage(stderr, tr)
 		return exitUsage
 	}
 	switch args[0] {
 	case "run":
-		return runDrill(args[1:], stdout, stderr)
+		return runDrill(args[1:], stdout, stderr, tr)
 	case "gameday":
-		return runGameDay(args[1:], stdout, stderr)
+		return runGameDay(args[1:], stdout, stderr, tr)
 	case "evidence":
-		return runEvidence(args[1:], stdout, stderr)
+		return runEvidence(args[1:], stdout, stderr, tr)
 	case "adapter":
-		return runAdapter(args[1:], stdout, stderr)
+		return runAdapter(args[1:], stdout, stderr, tr)
 	case "version":
-		return runVersion(stdout)
+		return runVersion(stdout, tr)
 	default:
-		fmt.Fprintf(stderr, "probavi: unknown command %q\n\n", args[0])
-		usage(stderr)
+		tr.Fprintf(stderr, msgUnknownCommand, args[0])
+		usage(stderr, tr)
 		return exitUsage
 	}
 }
 
-func runAdapter(args []string, stdout, stderr io.Writer) int {
+func runAdapter(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	if len(args) == 0 {
-		usage(stderr)
+		usage(stderr, tr)
 		return exitUsage
 	}
 	switch args[0] {
 	case "probe":
-		return runAdapterProbe(args[1:], stdout, stderr)
+		return runAdapterProbe(args[1:], stdout, stderr, tr)
 	case "conformance":
-		return runAdapterConformance(args[1:], stdout, stderr)
+		return runAdapterConformance(args[1:], stdout, stderr, tr)
 	default:
-		fmt.Fprintf(stderr, "probavi adapter: unknown subcommand %q\n\n", args[0])
-		usage(stderr)
+		tr.Fprintf(stderr, msgUnknownAdapterSub, args[0])
+		usage(stderr, tr)
 		return exitUsage
 	}
 }
 
-func runEvidence(args []string, stdout, stderr io.Writer) int {
+func runEvidence(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	if len(args) == 0 {
-		usage(stderr)
+		usage(stderr, tr)
 		return exitUsage
 	}
 	switch args[0] {
 	case "verify":
-		return runEvidenceVerify(args[1:], stdout, stderr)
+		return runEvidenceVerify(args[1:], stdout, stderr, tr)
 	case "keygen":
-		return runEvidenceKeygen(args[1:], stdout, stderr)
+		return runEvidenceKeygen(args[1:], stdout, stderr, tr)
 	default:
-		fmt.Fprintf(stderr, "probavi evidence: unknown subcommand %q\n\n", args[0])
-		usage(stderr)
+		tr.Fprintf(stderr, msgUnknownEvidenceSub, args[0])
+		usage(stderr, tr)
 		return exitUsage
 	}
 }
@@ -95,7 +103,7 @@ type verifyOutput struct {
 	Reason       string `json:"reason"`
 }
 
-func runEvidenceVerify(args []string, stdout, stderr io.Writer) int {
+func runEvidenceVerify(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	fs := flag.NewFlagSet("evidence verify", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	logPath := fs.String("log", "", "path to the evidence log file (required)")
@@ -105,7 +113,7 @@ func runEvidenceVerify(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if *logPath == "" || len(keyPaths) == 0 {
-		fmt.Fprintln(stderr, "probavi evidence verify: --log and at least one --key are required")
+		tr.Fprintf(stderr, msgVerifyFlagsRequired)
 		return exitUsage
 	}
 
@@ -137,7 +145,7 @@ func runEvidenceVerify(args []string, stdout, stderr io.Writer) int {
 		out.DamagedLines = []int{}
 	}
 	if err := json.NewEncoder(stdout).Encode(out); err != nil {
-		fmt.Fprintf(stderr, "probavi evidence verify: encode result: %v\n", err)
+		tr.Fprintf(stderr, msgVerifyEncodeResult, err)
 		return exitUsage
 	}
 	switch res.Status {
@@ -158,7 +166,7 @@ type keygenOutput struct {
 	PublicKeyFile string `json:"public_key_file"`
 }
 
-func runEvidenceKeygen(args []string, stdout, stderr io.Writer) int {
+func runEvidenceKeygen(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	fs := flag.NewFlagSet("evidence keygen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	out := fs.String("out", "", "path for the private key; the public key is written next to it as <path>.pub (required)")
@@ -166,7 +174,7 @@ func runEvidenceKeygen(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if *out == "" {
-		fmt.Fprintln(stderr, "probavi evidence keygen: --out is required")
+		tr.Fprintf(stderr, msgKeygenOutRequired)
 		return exitUsage
 	}
 	pubPath := *out + ".pub"
@@ -176,7 +184,7 @@ func runEvidenceKeygen(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if err := json.NewEncoder(stdout).Encode(keygenOutput{KeyID: keyID, KeyFile: *out, PublicKeyFile: pubPath}); err != nil {
-		fmt.Fprintf(stderr, "probavi evidence keygen: encode result: %v\n", err)
+		tr.Fprintf(stderr, msgKeygenEncodeResult, err)
 		return exitUsage
 	}
 	return exitValid
@@ -214,57 +222,13 @@ func (s *stringList) Set(v string) error {
 // build speaks. For a trust product the contracts matter as much as the
 // binary: an auditor's first question about a log is "written under which
 // schema", and an adapter author's is "against which protocol".
-func runVersion(stdout io.Writer) int {
+func runVersion(stdout io.Writer, tr *i18n.T) int {
 	fmt.Fprintf(stdout, "probavi %s %s/%s\n", version, runtime.GOOS, runtime.GOARCH)
-	fmt.Fprintf(stdout, "adapter protocol: %s\n", adapter.ProtocolVersion)
-	fmt.Fprintf(stdout, "evidence schema:  %s (verifies all published versions)\n", evidence.SchemaID)
+	tr.Fprintf(stdout, msgVersionProtocol, adapter.ProtocolVersion)
+	tr.Fprintf(stdout, msgVersionSchema, evidence.SchemaID)
 	return 0
 }
 
-func usage(w io.Writer) {
-	fmt.Fprint(w, `Usage: probavi <command> [arguments]
-
-Commands:
-  run --config <drill.yaml>
-      Execute one restore drill: sandbox up, restore, checks, teardown,
-      and exactly one signed evidence record. Prints a one-line JSON
-      summary on stdout. Run it from cron or a systemd timer — Probavi
-      deliberately has no built-in scheduler.
-      Exit codes: 0 backup proven restorable, 1 recoverability failure
-      (backup/restore/check), 2 infrastructure error or cancelled,
-      3 usage or setup error, 5 evidence record could not be written.
-
-  gameday --config <gameday.yaml>
-      Execute a DR game-day: member drills in dependency order, each the
-      full run pipeline with its own signed evidence record; dependents
-      of a failed member are skipped, independent branches continue.
-      Prints a one-line JSON summary on stdout (docs/gameday.md).
-      Exit codes: 0 every member passed, 1 a member drill failed,
-      2 errors/cancellation left members unproven, 3 usage or setup
-      error, 5 a member's evidence record could not be written.
-
-  evidence verify --log <file> --key <pubkey> [--key <pubkey> ...]
-      Verify an evidence log offline against one or more public keys.
-      Prints a one-line JSON result on stdout.
-      Exit codes: 0 VALID, 1 VALID_WITH_DAMAGE, 2 INVALID,
-      3 usage or I/O error.
-
-  evidence keygen --out <path>
-      Generate an ed25519 signing key pair: <path> (mode 0600) and
-      <path>.pub. Refuses to overwrite existing files.
-
-  adapter probe <name>
-      Resolve probavi-adapter-<name> and print its capabilities as JSON.
-
-  adapter conformance [--source-kind <kind>] [--source-param k=v ...] <name-or-path>
-      Drive the adapter through the frozen protocol conformance checks
-      (docs/adapter-protocol.md §10) against a simulated sandbox — no
-      container runtime involved. A new adapter is done when this passes.
-      Prints one line per check on stderr and a JSON report on stdout.
-      Exit codes: 0 conformant, 1 one or more checks failed, 3 usage error.
-
-  version
-      Print the probavi version and the contract versions this build
-      speaks (adapter protocol, evidence schema).
-`)
+func usage(w io.Writer, tr *i18n.T) {
+	tr.Fprintf(w, msgUsage)
 }

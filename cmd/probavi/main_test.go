@@ -11,6 +11,7 @@ import (
 
 	"github.com/aafeher/probavi/internal/adapter"
 	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/aafeher/probavi/internal/i18n"
 	"github.com/aafeher/probavi/internal/sandbox/remotehost"
 )
 
@@ -33,8 +34,10 @@ func TestVersionCommand(t *testing.T) {
 
 func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	// Tests run in the canonical English regardless of the machine's
+	// locale; Hungarian output is exercised by the dedicated i18n tests.
 	var out, errBuf bytes.Buffer
-	code = run(args, &out, &errBuf)
+	code = run(args, &out, &errBuf, i18n.English())
 	return code, out.String(), errBuf.String()
 }
 
