@@ -69,7 +69,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] Translate config-validation diagnostics (thread the translator into `internal/config`). **Complete 2026-08-02: `Load`/`LoadGameDay` take the injected translator, all 57 validation messages moved to the package's explicit registry (`config.Messages()`) and joined the CI gates; Hungarian shipped in the same change. YAML-unmarshaling internals (durations, scalars, syntax annotations) stay English — no translator can reach them.**
   - [x] German (`de`) **Complete 2026-08-02: `internal/i18n/locales/de.json`, all 76 messages, §4 gates green; Sie-form throughout, evidence terms rendered as Nachweis compounds (record → Nachweisdatensatz, log → Nachweisprotokoll, schema → Nachweisschema).**
   - [x] French (`fr`) **Complete 2026-08-02: `internal/i18n/locales/fr.json`, all 76 messages, §4 gates green; vous-form, drill → exercice, evidence terms as preuve compounds (record → enregistrement de preuve, log → journal de preuves, schema → schéma de preuve).**
-  - [ ] Italian (`it`)
+  - [x] Italian (`it`) **Complete 2026-08-02: `internal/i18n/locales/it.json`, all 76 messages, §4 gates green; impersonal-infinitive instructions, drill → esercitazione, evidence terms as evidenza compounds (record di evidenza / registro delle evidenze / schema delle evidenze).**
   - [ ] Spanish (`es`)
   - [ ] Polish (`pl`)
   - [ ] Romanian (`ro`)
