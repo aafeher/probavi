@@ -72,7 +72,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] Italian (`it`) **Complete 2026-08-02: `internal/i18n/locales/it.json`, all 76 messages, §4 gates green; impersonal-infinitive instructions, drill → esercitazione, evidence terms as evidenza compounds (record di evidenza / registro delle evidenze / schema delle evidenze).**
   - [x] Spanish (`es`) **Complete 2026-08-02: `internal/i18n/locales/es.json`, all 76 messages, §4 gates green; usted-form, drill → simulacro, check → comprobación, evidence terms as evidencia compounds (registro de evidencia / log de evidencias / esquema de evidencia).**
   - [x] Polish (`pl`) **Complete 2026-08-02: `internal/i18n/locales/pl.json`, all 76 messages, §4 gates green; impersonal GNOME-style register, drill → ćwiczenie, check → kontrola, evidence terms as dowód compounds (rekord dowodowy / dziennik dowodów / schemat dowodów), „pole X jest wymagane" for gender-safe required-field lines.**
-  - [ ] Romanian (`ro`)
+  - [x] Romanian (`ro`) **Complete 2026-08-02: `internal/i18n/locales/ro.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → exercițiu, evidence terms as dovadă compounds (înregistrare de dovadă / jurnal de dovezi / schema dovezilor).**
   - [ ] Dutch (`nl`)
   - [ ] Greek (`el`)
   - [ ] Portuguese (`pt`)
