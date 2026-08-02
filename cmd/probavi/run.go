@@ -22,6 +22,7 @@ import (
 	"github.com/aafeher/probavi/internal/core"
 	"github.com/aafeher/probavi/internal/evidence"
 	"github.com/aafeher/probavi/internal/gameday"
+	"github.com/aafeher/probavi/internal/i18n"
 	"github.com/aafeher/probavi/internal/metrics"
 	"github.com/aafeher/probavi/internal/notify"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
@@ -43,7 +44,7 @@ const (
 	exitEvidenceLost = 5
 )
 
-func runDrill(args []string, stdout, stderr io.Writer) int {
+func runDrill(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path to the drill configuration YAML (required)")
@@ -51,7 +52,7 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if *configPath == "" {
-		fmt.Fprintln(stderr, "probavi run: --config is required")
+		tr.Fprintf(stderr, msgRunConfigRequired)
 		return exitUsage
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
@@ -64,7 +65,7 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 	summary, code := executeDrill(ctx, *configPath, logger, stderr, "probavi run")
 	if code == exitPass || code == exitFail || code == exitError {
 		if err := json.NewEncoder(stdout).Encode(summary); err != nil {
-			fmt.Fprintf(stderr, "probavi run: encode summary: %v\n", err)
+			tr.Fprintf(stderr, msgRunEncodeSummary, err)
 		}
 	}
 	return code
@@ -125,7 +126,7 @@ func executeDrill(parent context.Context, configPath string, logger *slog.Logger
 
 // runGameDay implements `probavi gameday`: a multi-database restore
 // exercise in dependency order (docs/gameday.md).
-func runGameDay(args []string, stdout, stderr io.Writer) int {
+func runGameDay(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	fs := flag.NewFlagSet("gameday", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	configPath := fs.String("config", "", "path to the game-day configuration YAML (required)")
@@ -133,7 +134,7 @@ func runGameDay(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if *configPath == "" {
-		fmt.Fprintln(stderr, "probavi gameday: --config is required")
+		tr.Fprintf(stderr, msgGameDayConfigRequired)
 		return exitUsage
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
@@ -163,7 +164,7 @@ func runGameDay(args []string, stdout, stderr io.Writer) int {
 	}
 	summary := gameday.Run(ctx, cfg, runner, logger)
 	if err := json.NewEncoder(stdout).Encode(summary); err != nil {
-		fmt.Fprintf(stderr, "probavi gameday: encode summary: %v\n", err)
+		tr.Fprintf(stderr, msgGameDayEncodeSummary, err)
 	}
 	return gamedayExit(summary)
 }
@@ -337,7 +338,7 @@ func (r remotehostProvider) SweepOrphans(ctx context.Context) ([]string, error) 
 
 // runAdapterConformance implements `probavi adapter conformance`: run the
 // frozen §10 check list against an adapter and report the verdicts.
-func runAdapterConformance(args []string, stdout, stderr io.Writer) int {
+func runAdapterConformance(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	fs := flag.NewFlagSet("adapter conformance", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	kind := fs.String("source-kind", "", "source kind for the provision checks (default: the first kind the probe declares)")
@@ -347,14 +348,14 @@ func runAdapterConformance(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	if fs.NArg() != 1 || fs.Arg(0) == "" {
-		fmt.Fprintln(stderr, "probavi adapter conformance: exactly one adapter name or executable path is required")
+		tr.Fprintf(stderr, msgConformanceAdapterRequired)
 		return exitUsage
 	}
 	sourceParams := map[string]string{}
 	for _, p := range params {
 		k, v, ok := strings.Cut(p, "=")
 		if !ok || k == "" {
-			fmt.Fprintf(stderr, "probavi adapter conformance: --source-param %q is not k=v\n", p)
+			tr.Fprintf(stderr, msgConformanceBadSourceParam, p)
 			return exitUsage
 		}
 		sourceParams[k] = v
@@ -383,7 +384,7 @@ func runAdapterConformance(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if err := json.NewEncoder(stdout).Encode(report); err != nil {
-		fmt.Fprintf(stderr, "probavi adapter conformance: encode report: %v\n", err)
+		tr.Fprintf(stderr, msgConformanceEncodeReport, err)
 		return exitError
 	}
 	if report.Failed > 0 {
@@ -411,9 +412,9 @@ func resolveAdapterExecutable(arg string) (string, error) {
 
 // runAdapterProbe implements `probavi adapter probe <name>`: resolve the
 // adapter and print its probe response as JSON.
-func runAdapterProbe(args []string, stdout, stderr io.Writer) int {
+func runAdapterProbe(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	if len(args) != 1 || args[0] == "" {
-		fmt.Fprintln(stderr, "probavi adapter probe: exactly one adapter name is required")
+		tr.Fprintf(stderr, msgProbeNameRequired)
 		return exitUsage
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
@@ -430,7 +431,7 @@ func runAdapterProbe(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	if err := json.NewEncoder(stdout).Encode(res); err != nil {
-		fmt.Fprintf(stderr, "probavi adapter probe: encode: %v\n", err)
+		tr.Fprintf(stderr, msgProbeEncode, err)
 		return exitError
 	}
 	return exitPass

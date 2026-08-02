@@ -125,7 +125,7 @@ Implementation rule: the Phase 3 audit-report exporter gets a `mappings/` data f
 4. **Never weaken cleanup or signing paths** to make tests pass. If a test is hard to write, that is design feedback.
 5. Update ROADMAP.md checkboxes as work completes; keep README examples in sync with reality (mark clearly what is aspirational).
 6. Project skills live in `.claude/skills/` — consult them when the task matches their descriptions (adapter work, evidence work, general Go standards, commit messages).
-7. Language: all code, comments, docs, commits in English. English is the canonical source language of the project; localization of user-facing output (i18n) is a long-term goal — see ROADMAP.md Phase 4 — and must never change the language of code, specs, or evidence records.
+7. Language: all code, comments, docs, commits in English. English is the canonical source language of the project; localization of user-facing CLI output is underway (`docs/i18n.md` is normative, language roadmap in ROADMAP.md Phase 4) and must never change the language of code, specs, logs, or evidence records.
 
 ## 6. Open questions (do not resolve unilaterally)
 

@@ -237,6 +237,10 @@ members:
 
 `probavi gameday --config gameday.yaml` runs each member through the full drill pipeline — every member leaves its own signed evidence record, exactly as if run standalone. Dependents of a failed member are skipped (restoring an app database against an unrecoverable auth database proves nothing), independent branches always run to completion, and the one-line JSON summary points at every record written (`seq` + evidence path) plus the total wall clock — the number a DR plan calls the service-level recovery time. Execution is sequential by default (`max_parallel` opts in to concurrency); semantics, summary contract, and exit codes live in [`docs/gameday.md`](docs/gameday.md).
 
+## Localization
+
+The CLI speaks English by default and is localizable (`docs/i18n.md`): set `PROBAVI_LANG=hu` — or just have a Hungarian `LANG` — and the usage text and diagnostics switch to Hungarian, the first supported national language (further EU languages arrive per the ROADMAP). Machine outputs never change language: evidence records, JSON summaries, the adapter protocol, and logs are contracts and stay English everywhere.
+
 ## Design principles
 
 - **Build on top of backup tools, never replace them.** Probavi orchestrates and verifies; pgBackRest and friends keep doing what they do best.
