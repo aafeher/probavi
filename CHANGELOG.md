@@ -24,6 +24,10 @@ always called out explicitly.
   translated language cannot ship. Machine contracts are never
   translated: evidence records, JSON summaries, the adapter protocol,
   notification payloads, and structured logs stay English.
+  Configuration-validation diagnostics (drill and game-day files) are
+  part of the translated surface: `probavi run --config broken.yaml`
+  explains the problem in the operator's language, with config keys and
+  locators kept verbatim.
 - DR game-day orchestration (`probavi gameday`, spec docs/gameday.md):
   multi-database restore exercises in dependency order. A game-day
   config references normal drill files as members with `depends_on`

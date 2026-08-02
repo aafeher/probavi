@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/aafeher/probavi/internal/i18n"
 )
 
 var (
@@ -133,56 +135,72 @@ var notifyOutcomes = map[string]bool{
 }
 
 // Load reads, parses, and validates a drill configuration. The returned
-// error is human-oriented: syntax errors carry line/column context and an
-// annotated source excerpt; validation reports every problem found.
-func Load(path string) (*Config, error) {
+// error is human-oriented — syntax errors carry line/column context and
+// an annotated source excerpt, validation reports every problem found —
+// and its diagnostics speak the translator's language (docs/i18n.md;
+// YAML-level messages remain English).
+func Load(path string, tr *i18n.T) (*Config, error) {
+	if tr == nil {
+		tr = i18n.English()
+	}
 	raw, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
+		return nil, errorf(tr, msgReadConfig, err)
 	}
 	cfg := &Config{}
 	dec := yaml.NewDecoder(bytes.NewReader(raw), yaml.Strict())
 	if err := dec.Decode(cfg); err != nil {
 		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("config %s is empty", path)
+			return nil, errorf(tr, msgConfigEmpty, path)
 		}
-		return nil, fmt.Errorf("parse config %s:\n%s", path, yaml.FormatError(err, false, true))
+		return nil, errorf(tr, msgParseConfig, path, yaml.FormatError(err, false, true))
 	}
 	sum := sha256.Sum256(raw)
 	cfg.Hash = "sha256:" + hex.EncodeToString(sum[:])
 	cfg.Path = path
-	if err := cfg.validate(); err != nil {
-		return nil, fmt.Errorf("invalid config %s:\n%w", path, err)
+	if err := cfg.validate(tr); err != nil {
+		return nil, errorf(tr, msgInvalidConfig, path, err)
 	}
 	return cfg, nil
 }
 
-// problems collects validation errors so a config author sees everything
-// wrong at once instead of fixing one field per run.
-type problems []error
-
-func (p *problems) add(format string, a ...any) {
-	*p = append(*p, fmt.Errorf(format, a...))
+// errorf builds a translated error. The no-argument path of Sprintf
+// returns the (translated) format verbatim, so verbs — including %w —
+// survive intact; verb parity per catalog is CI-gated.
+func errorf(tr *i18n.T, format string, a ...any) error {
+	return fmt.Errorf(tr.Sprintf(format), a...)
 }
 
-func (c *Config) validate() error {
-	var p problems
+// problems collects validation errors so a config author sees everything
+// wrong at once instead of fixing one field per run; diagnostics are
+// translated as they are recorded.
+type problems struct {
+	tr   *i18n.T
+	errs []error
+}
+
+func (p *problems) add(format string, a ...any) {
+	p.errs = append(p.errs, errorf(p.tr, format, a...))
+}
+
+func (c *Config) validate(tr *i18n.T) error {
+	p := problems{tr: tr}
 	c.Target.validate(&p)
 	c.Sandbox.validate(&p)
 	c.validateChecks(&p)
 	c.Evidence.validate(&p)
 	if c.Metrics != nil && c.Metrics.PrometheusTextfile == "" {
-		p.add("metrics.prometheus_textfile is required when the metrics section is present")
+		p.add(msgMetricsTextfile)
 	}
 	if c.Notify != nil {
 		c.Notify.validate(&p)
 	}
-	return errors.Join(p...)
+	return errors.Join(p.errs...)
 }
 
 func (n *Notify) validate(p *problems) {
 	if len(n.Webhooks) == 0 {
-		p.add("notify.webhooks must list at least one webhook when the notify section is present")
+		p.add(msgNotifyWebhooksRequired)
 		return
 	}
 	for i := range n.Webhooks {
@@ -194,28 +212,28 @@ func (w *NotifyWebhook) validate(p *problems, i int) {
 	at := fmt.Sprintf("notify.webhooks[%d]", i)
 	switch {
 	case w.URL != "" && w.URLEnv != "":
-		p.add("%s: exactly one of url or url_env must be set, not both", at)
+		p.add(msgWebhookURLNotBoth, at)
 	case w.URLEnv != "":
 		if !envNamePattern.MatchString(w.URLEnv) {
-			p.add("%s: url_env %q is not a valid environment variable name", at, w.URLEnv)
+			p.add(msgWebhookURLEnvName, at, w.URLEnv)
 		}
 	case w.URL != "":
 		if u, err := url.Parse(w.URL); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			p.add("%s: url must be an absolute http(s) URL", at)
+			p.add(msgWebhookURLShape, at)
 		}
 	default:
-		p.add("%s: exactly one of url or url_env must be set (token-bearing URLs belong in url_env)", at)
+		p.add(msgWebhookURLNeither, at)
 	}
 	if w.SecretEnv != "" && !envNamePattern.MatchString(w.SecretEnv) {
-		p.add("%s: secret_env %q is not a valid environment variable name", at, w.SecretEnv)
+		p.add(msgWebhookSecretEnvName, at, w.SecretEnv)
 	}
 	seen := make(map[string]bool, len(w.On))
 	for _, o := range w.On {
 		switch {
 		case !notifyOutcomes[o]:
-			p.add("%s: unknown outcome %q in on (supported: pass, fail, error, cancelled)", at, o)
+			p.add(msgWebhookUnknownOutcome, at, o)
 		case seen[o]:
-			p.add("%s: duplicate outcome %q in on", at, o)
+			p.add(msgWebhookDuplicateOutcome, at, o)
 		}
 		seen[o] = true
 	}
@@ -223,20 +241,20 @@ func (w *NotifyWebhook) validate(p *problems, i int) {
 
 func (t *Target) validate(p *problems) {
 	if t.Name == "" {
-		p.add("target.name is required — it identifies the drill in evidence records")
+		p.add(msgTargetNameRequired)
 	}
 	switch {
 	case t.Adapter == "":
-		p.add(`target.adapter is required (e.g. "postgres")`)
+		p.add(msgAdapterRequired)
 	case !adapterNamePattern.MatchString(t.Adapter):
-		p.add("target.adapter %q must be lowercase letters, digits, and hyphens (it resolves to the executable probavi-adapter-%s)", t.Adapter, t.Adapter)
+		p.add(msgAdapterNamePattern, t.Adapter, t.Adapter)
 	}
 	if t.Source.Kind == "" {
-		p.add(`target.source.kind is required (adapter-defined, e.g. "pgdump" — see the adapter's probe output)`)
+		p.add(msgSourceKindRequired)
 	}
 	for _, name := range t.Source.CredentialEnv {
 		if !envNamePattern.MatchString(name) {
-			p.add("target.source.credential_env entry %q is not a valid environment variable name", name)
+			p.add(msgCredentialEnvName, name)
 		}
 	}
 	if t.PITR != nil {
@@ -248,13 +266,13 @@ func (pt *PITR) validate(p *problems) {
 	hasTime := pt.TargetTime != ""
 	hasAge := pt.TargetAge != 0
 	if hasTime == hasAge {
-		p.add(`target.pitr requires exactly one of target_time (RFC 3339, e.g. "2026-07-30T14:32:00Z") or target_age (e.g. "24h")`)
+		p.add(msgPITRExactlyOne)
 		return
 	}
 	if hasTime {
 		ts, err := time.Parse(time.RFC3339, pt.TargetTime)
 		if err != nil {
-			p.add("target.pitr.target_time %q is not an RFC 3339 timestamp", pt.TargetTime)
+			p.add(msgPITRBadTargetTime, pt.TargetTime)
 			return
 		}
 		pt.parsedTime = ts
@@ -272,16 +290,16 @@ func (pt *PITR) Resolve(now time.Time) time.Time {
 
 func (s *Sandbox) validate(p *problems) {
 	if s.Provider == "" {
-		p.add(`sandbox.provider is required (e.g. "docker")`)
+		p.add(msgProviderRequired)
 	}
 	if s.Timeout == 0 {
-		p.add(`sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. "30m")`)
+		p.add(msgTimeoutRequired)
 	}
 }
 
 func (c *Config) validateChecks(p *problems) {
 	if len(c.Checks) == 0 {
-		p.add(`at least one check is required (start with "- builtin: service_healthy")`)
+		p.add(msgChecksRequired)
 		return
 	}
 	for i := range c.Checks {
@@ -291,10 +309,10 @@ func (c *Config) validateChecks(p *problems) {
 
 func (e *Evidence) validate(p *problems) {
 	if e.Path == "" {
-		p.add("evidence.path is required — a drill that leaves no evidence record proves nothing")
+		p.add(msgEvidencePathRequired)
 	}
 	if e.SignKey == "" {
-		p.add(`evidence.sign_key is required (generate one with "probavi evidence keygen")`)
+		p.add(msgSignKeyRequired)
 	}
 }
 
@@ -302,22 +320,22 @@ func (ch *Check) validate(p *problems, i int) {
 	at := fmt.Sprintf("checks[%d]", i)
 	switch {
 	case ch.Builtin != "" && ch.SQL != "":
-		p.add("%s: exactly one of builtin or sql must be set, not both", at)
+		p.add(msgCheckBuiltinOrSQLNotBoth, at)
 	case ch.Builtin != "":
 		ch.validateBuiltin(p, at)
 	case ch.SQL != "":
 		ch.validateSQL(p, at)
 	default:
-		p.add("%s: exactly one of builtin or sql must be set", at)
+		p.add(msgCheckBuiltinOrSQL, at)
 	}
 }
 
 func (ch *Check) validateBuiltin(p *problems, at string) {
 	if ch.Expect.IsSet() {
-		p.add("%s: expect is only valid for sql checks", at)
+		p.add(msgCheckExpectOnlySQL, at)
 	}
 	if ch.Name != "" {
-		p.add("%s: name is only valid for sql checks (builtin checks are named automatically)", at)
+		p.add(msgCheckNameOnlySQL, at)
 	}
 	switch ch.Builtin {
 	case "service_healthy":
@@ -330,7 +348,7 @@ func (ch *Check) validateBuiltin(p *problems, at string) {
 	case "freshness":
 		ch.validateFreshness(p, at)
 	default:
-		p.add("%s: unknown builtin %q (supported: service_healthy, table_exists, row_count, freshness)", at, ch.Builtin)
+		p.add(msgCheckUnknownBuiltin, at, ch.Builtin)
 	}
 }
 
@@ -339,11 +357,11 @@ func (ch *Check) validateRowCount(p *problems, at string) {
 	ch.forbid(p, at, fields{column: true, maxAge: true})
 	switch {
 	case ch.Min == nil && ch.Max == nil:
-		p.add("%s: row_count requires min, max, or both", at)
+		p.add(msgCheckRowCountBounds, at)
 	case ch.Min != nil && *ch.Min < 0, ch.Max != nil && *ch.Max < 0:
-		p.add("%s: row_count bounds must not be negative", at)
+		p.add(msgCheckRowCountNegative, at)
 	case ch.Min != nil && ch.Max != nil && *ch.Min > *ch.Max:
-		p.add("%s: row_count min (%d) exceeds max (%d)", at, *ch.Min, *ch.Max)
+		p.add(msgCheckRowCountMinMax, at, *ch.Min, *ch.Max)
 	}
 }
 
@@ -351,16 +369,16 @@ func (ch *Check) validateFreshness(p *problems, at string) {
 	ch.requireTable(p, at)
 	ch.forbid(p, at, fields{minmax: true})
 	if ch.Column == "" {
-		p.add("%s: freshness requires column (the timestamp column to inspect)", at)
+		p.add(msgCheckFreshnessColumn, at)
 	}
 	if ch.MaxAge == 0 {
-		p.add(`%s: freshness requires max_age (e.g. "24h")`, at)
+		p.add(msgCheckFreshnessMaxAge, at)
 	}
 }
 
 func (ch *Check) validateSQL(p *problems, at string) {
 	if !ch.Expect.IsSet() {
-		p.add("%s: sql checks require expect — the exact value the query must return", at)
+		p.add(msgCheckSQLExpect, at)
 	}
 	ch.forbid(p, at, fields{table: true, column: true, minmax: true, maxAge: true})
 }
@@ -372,7 +390,7 @@ type fields struct {
 
 func (ch *Check) requireTable(p *problems, at string) {
 	if ch.Table == "" {
-		p.add("%s: %s requires table", at, ch.Builtin)
+		p.add(msgCheckRequiresTable, at, ch.Builtin)
 	}
 }
 
@@ -382,15 +400,15 @@ func (ch *Check) forbid(p *problems, at string, f fields) {
 		kind = "sql checks"
 	}
 	if f.table && ch.Table != "" {
-		p.add("%s: table is not valid for %s", at, kind)
+		p.add(msgCheckTableNotValid, at, kind)
 	}
 	if f.column && ch.Column != "" {
-		p.add("%s: column is not valid for %s", at, kind)
+		p.add(msgCheckColumnNotValid, at, kind)
 	}
 	if f.minmax && (ch.Min != nil || ch.Max != nil) {
-		p.add("%s: min/max are not valid for %s", at, kind)
+		p.add(msgCheckMinMaxNotValid, at, kind)
 	}
 	if f.maxAge && ch.MaxAge != 0 {
-		p.add("%s: max_age is not valid for %s", at, kind)
+		p.add(msgCheckMaxAgeNotValid, at, kind)
 	}
 }

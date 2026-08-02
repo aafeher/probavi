@@ -39,7 +39,7 @@ func writeGameDay(t *testing.T, content string) string {
 
 func TestLoadGameDay(t *testing.T) {
 	path := writeGameDay(t, validGameDayYAML)
-	g, err := LoadGameDay(path)
+	g, err := LoadGameDay(path, nil)
 	if err != nil {
 		t.Fatalf("LoadGameDay: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestLoadGameDayRejects(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := LoadGameDay(writeGameDay(t, tt.yaml))
+			_, err := LoadGameDay(writeGameDay(t, tt.yaml), nil)
 			if err == nil {
 				t.Fatal("LoadGameDay accepted an invalid config")
 			}
@@ -112,7 +112,7 @@ func TestLoadGameDayRejectsInvalidMemberConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "beta.yaml"), []byte(broken), 0o600); err != nil {
 		t.Fatalf("write broken member: %v", err)
 	}
-	_, err := LoadGameDay(path)
+	_, err := LoadGameDay(path, nil)
 	if err == nil {
 		t.Fatal("LoadGameDay accepted a game-day with an invalid member drill config")
 	}
@@ -128,11 +128,11 @@ func TestLoadGameDayRejectsInvalidMemberConfig(t *testing.T) {
 // max_parallel above 1 (the store's single-writer lock would make them
 // collide mid-exercise).
 func TestLoadGameDaySharedLogRule(t *testing.T) {
-	if _, err := LoadGameDay(writeGameDay(t, validGameDayYAML)); err != nil {
+	if _, err := LoadGameDay(writeGameDay(t, validGameDayYAML), nil); err != nil {
 		t.Fatalf("sequential shared log must be accepted: %v", err)
 	}
 	parallel := strings.Replace(validGameDayYAML, "timeout: 1h", "timeout: 1h\nmax_parallel: 2", 1)
-	_, err := LoadGameDay(writeGameDay(t, parallel))
+	_, err := LoadGameDay(writeGameDay(t, parallel), nil)
 	if err == nil {
 		t.Fatal("LoadGameDay accepted a shared evidence log with max_parallel 2")
 	}
@@ -144,16 +144,16 @@ func TestLoadGameDaySharedLogRule(t *testing.T) {
 }
 
 func TestLoadGameDayFileProblems(t *testing.T) {
-	if _, err := LoadGameDay(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
+	if _, err := LoadGameDay(filepath.Join(t.TempDir(), "missing.yaml"), nil); err == nil {
 		t.Error("LoadGameDay accepted a missing file")
 	}
-	if _, err := LoadGameDay(writeGameDay(t, "")); err == nil || !strings.Contains(err.Error(), "empty") {
+	if _, err := LoadGameDay(writeGameDay(t, ""), nil); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Errorf("empty config: got %v, want empty-config error", err)
 	}
-	if _, err := LoadGameDay(writeGameDay(t, "name: [broken\n")); err == nil {
+	if _, err := LoadGameDay(writeGameDay(t, "name: [broken\n"), nil); err == nil {
 		t.Error("LoadGameDay accepted broken YAML syntax")
 	}
-	if _, err := LoadGameDay(writeGameDay(t, validGameDayYAML+"name: twice\n")); err == nil {
+	if _, err := LoadGameDay(writeGameDay(t, validGameDayYAML+"name: twice\n"), nil); err == nil {
 		t.Error("LoadGameDay accepted a duplicate key")
 	}
 }
@@ -161,9 +161,9 @@ func TestLoadGameDayFileProblems(t *testing.T) {
 func TestLoadExampleGameDay(t *testing.T) {
 	// The committed example must always load: this keeps README and
 	// examples honest (AGENTS.md §5.5).
-	g, err := LoadGameDay(filepath.Join("..", "..", "examples", "gameday.example.yaml"))
+	g, err := LoadGameDay(filepath.Join("..", "..", "examples", "gameday.example.yaml"), nil)
 	if err != nil {
-		t.Fatalf("LoadGameDay(examples/gameday.example.yaml): %v", err)
+		t.Fatalf("LoadGameDay(examples/gameday.example.yaml, nil): %v", err)
 	}
 	if g.Name != "shop-stack" || len(g.Members) != 2 {
 		t.Errorf("example = %+v, want shop-stack with 2 members", g)
