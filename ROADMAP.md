@@ -75,7 +75,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] Romanian (`ro`) **Complete 2026-08-02: `internal/i18n/locales/ro.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → exercițiu, evidence terms as dovadă compounds (înregistrare de dovadă / jurnal de dovezi / schema dovezilor).**
   - [x] Dutch (`nl`) **Complete 2026-08-02: `internal/i18n/locales/nl.json`, all 76 messages, §4 gates green; informal imperative, drill → oefening, evidence terms as bewijs compounds (bewijsrecord / bewijslog / bewijsschema), Dutch orthography back-up.**
   - [x] Greek (`el`) **Complete 2026-08-02: `internal/i18n/locales/el.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → άσκηση, adapter → προσαρμογέας, evidence terms as τεκμήριο compounds (εγγραφή τεκμηρίου / αρχείο καταγραφής τεκμηρίων / σχήμα τεκμηρίων).**
-  - [ ] Portuguese (`pt`)
+  - [x] Portuguese (`pt`) **Complete 2026-08-02: `internal/i18n/locales/pt.json`, all 76 messages, §4 gates green; European Portuguese (registo / ficheiros / contentores, AO90), drill → simulacro, evidence terms as evidência compounds (registo de evidência / log de evidências / esquema de evidência).**
   - [ ] Czech (`cs`)
   - [ ] Swedish (`sv`)
   - [ ] Bulgarian (`bg`)
