@@ -37,6 +37,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "run":
 		return runDrill(args[1:], stdout, stderr)
+	case "gameday":
+		return runGameDay(args[1:], stdout, stderr)
 	case "evidence":
 		return runEvidence(args[1:], stdout, stderr)
 	case "adapter":
@@ -231,6 +233,15 @@ Commands:
       Exit codes: 0 backup proven restorable, 1 recoverability failure
       (backup/restore/check), 2 infrastructure error or cancelled,
       3 usage or setup error, 5 evidence record could not be written.
+
+  gameday --config <gameday.yaml>
+      Execute a DR game-day: member drills in dependency order, each the
+      full run pipeline with its own signed evidence record; dependents
+      of a failed member are skipped, independent branches continue.
+      Prints a one-line JSON summary on stdout (docs/gameday.md).
+      Exit codes: 0 every member passed, 1 a member drill failed,
+      2 errors/cancellation left members unproven, 3 usage or setup
+      error, 5 a member's evidence record could not be written.
 
   evidence verify --log <file> --key <pubkey> [--key <pubkey> ...]
       Verify an evidence log offline against one or more public keys.
