@@ -70,7 +70,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] German (`de`) **Complete 2026-08-02: `internal/i18n/locales/de.json`, all 76 messages, §4 gates green; Sie-form throughout, evidence terms rendered as Nachweis compounds (record → Nachweisdatensatz, log → Nachweisprotokoll, schema → Nachweisschema).**
   - [x] French (`fr`) **Complete 2026-08-02: `internal/i18n/locales/fr.json`, all 76 messages, §4 gates green; vous-form, drill → exercice, evidence terms as preuve compounds (record → enregistrement de preuve, log → journal de preuves, schema → schéma de preuve).**
   - [x] Italian (`it`) **Complete 2026-08-02: `internal/i18n/locales/it.json`, all 76 messages, §4 gates green; impersonal-infinitive instructions, drill → esercitazione, evidence terms as evidenza compounds (record di evidenza / registro delle evidenze / schema delle evidenze).**
-  - [ ] Spanish (`es`)
+  - [x] Spanish (`es`) **Complete 2026-08-02: `internal/i18n/locales/es.json`, all 76 messages, §4 gates green; usted-form, drill → simulacro, check → comprobación, evidence terms as evidencia compounds (registro de evidencia / log de evidencias / esquema de evidencia).**
   - [ ] Polish (`pl`)
   - [ ] Romanian (`ro`)
   - [ ] Dutch (`nl`)
