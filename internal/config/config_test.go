@@ -69,6 +69,27 @@ func TestLoadExampleConfig(t *testing.T) {
 	if cfg.Metrics == nil || cfg.Metrics.PrometheusTextfile == "" {
 		t.Errorf("metrics = %+v, want prometheus_textfile set", cfg.Metrics)
 	}
+	assertExampleNotify(t, cfg)
+}
+
+// assertExampleNotify checks the example's notify section: one env-based
+// webhook with HMAC and an on filter, one literal-URL webhook on defaults.
+func assertExampleNotify(t *testing.T, cfg *Config) {
+	t.Helper()
+	if cfg.Notify == nil || len(cfg.Notify.Webhooks) != 2 {
+		t.Fatalf("notify = %+v, want 2 webhooks", cfg.Notify)
+	}
+	first := cfg.Notify.Webhooks[0]
+	if first.URLEnv != "PROBAVI_WEBHOOK_URL" || first.SecretEnv != "PROBAVI_WEBHOOK_SECRET" {
+		t.Errorf("webhook[0] = %+v, want url_env and secret_env set", first)
+	}
+	if len(first.On) != 2 || first.On[0] != "fail" || first.On[1] != "error" {
+		t.Errorf("webhook[0].On = %v, want [fail error]", first.On)
+	}
+	second := cfg.Notify.Webhooks[1]
+	if second.URL == "" || second.URLEnv != "" || len(second.On) != 0 {
+		t.Errorf("webhook[1] = %+v, want literal url with default on", second)
+	}
 }
 
 func TestLoadComputesConfigHash(t *testing.T) {
@@ -130,6 +151,15 @@ func TestLoadRejects(t *testing.T) {
 		{"pitr with neither target", strings.Replace(validYAML, "adapter: postgres", "adapter: postgres\n  pitr: {}", 1), []string{"exactly one of target_time"}},
 		{"pitr bad target_time", strings.Replace(validYAML, "adapter: postgres", "adapter: postgres\n  pitr:\n    target_time: \"yesterday 14:32\"", 1), []string{"not an RFC 3339 timestamp"}},
 		{"pitr negative target_age", strings.Replace(validYAML, "adapter: postgres", "adapter: postgres\n  pitr:\n    target_age: -24h", 1), []string{"must be positive"}},
+		{"empty notify section", validYAML + "notify:\n  webhooks: []\n", []string{"notify.webhooks must list at least one webhook"}},
+		{"webhook with url and url_env", validYAML + "notify:\n  webhooks:\n    - url: https://example.internal/hook\n      url_env: HOOK_URL\n", []string{"notify.webhooks[0]", "not both"}},
+		{"webhook with neither url nor url_env", validYAML + "notify:\n  webhooks:\n    - on: [fail]\n", []string{"notify.webhooks[0]", "exactly one of url or url_env"}},
+		{"webhook relative url", validYAML + "notify:\n  webhooks:\n    - url: not-a-url\n", []string{"notify.webhooks[0]", "absolute http(s) URL"}},
+		{"webhook non-http url", validYAML + "notify:\n  webhooks:\n    - url: ftp://example.internal/hook\n", []string{"notify.webhooks[0]", "absolute http(s) URL"}},
+		{"webhook bad url_env name", validYAML + "notify:\n  webhooks:\n    - url_env: 1BAD-NAME\n", []string{"notify.webhooks[0]", "url_env", "1BAD-NAME"}},
+		{"webhook bad secret_env name", validYAML + "notify:\n  webhooks:\n    - url: https://example.internal/hook\n      secret_env: bad name\n", []string{"notify.webhooks[0]", "secret_env", "bad name"}},
+		{"webhook unknown on outcome", validYAML + "notify:\n  webhooks:\n    - url: https://example.internal/hook\n      on: [pass, success]\n", []string{"notify.webhooks[0]", `unknown outcome "success"`, "supported: pass, fail, error, cancelled"}},
+		{"webhook duplicate on outcome", validYAML + "notify:\n  webhooks:\n    - url: https://example.internal/hook\n      on: [fail, fail]\n", []string{"notify.webhooks[0]", `duplicate outcome "fail"`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

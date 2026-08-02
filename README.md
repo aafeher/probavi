@@ -205,6 +205,20 @@ Probavi deliberately has no built-in scheduler — cron or a systemd timer owns 
 
 The evidence store additionally holds its own single-writer lock, so overlapping drills against the same log fail fast instead of interleaving. Prometheus metrics land in the configured textfile for node_exporter — the last run's headline numbers plus rolling restore-duration quantiles recomputed from the evidence log itself (`probavi_restore_duration_rolling_seconds{quantile="0.5"|"0.95"|"1"}` over the last 100 restores). Two alert rules cover most needs: `time() - probavi_last_success_timestamp_seconds > 172800` ("no proven restore for two days") and `probavi_restore_duration_rolling_seconds{quantile="0.95"} > <your RTO>` ("restores are drifting past the objective"). Audit report export arrives in Phase 3.
 
+## Notifications
+
+Each finished drill can announce itself over webhooks — one JSON POST per configured endpoint after the evidence record is signed, optionally HMAC-signed (`X-Probavi-Signature-256`, GitHub-style) so receivers can authenticate the push:
+
+```yaml
+notify:
+  webhooks:
+    - url_env: PROBAVI_WEBHOOK_URL       # token-bearing URLs are credentials: env only
+      secret_env: PROBAVI_WEBHOOK_SECRET # optional HMAC signing
+      on: [fail, error]                  # default: every outcome (dead-man's-switch friendly)
+```
+
+The payload (`probavi-notification/1`) is a signpost to the signed record — outcome, check counts, restore timing, and the sequence number to verify — never a substitute for it, and delivery failures are logged but never change the drill's verdict or exit code. Slack, email, and dead-man's-switch services are recipes on top of the plain webhook; the payload contract, delivery semantics, and recipes live in [`docs/notifications.md`](docs/notifications.md).
+
 ## Design principles
 
 - **Build on top of backup tools, never replace them.** Probavi orchestrates and verifies; pgBackRest and friends keep doing what they do best.

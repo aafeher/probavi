@@ -1,6 +1,6 @@
 # Machine-readable schemas
 
-JSON Schema (draft 2020-12) files for Probavi's two frozen contracts:
+JSON Schema (draft 2020-12) files for Probavi's frozen contracts:
 
 - `adapter/` — every message and payload shape of the adapter protocol
   (`probavi-adapter/0`). Start at `request.json`, `sandbox-call.json`,
@@ -9,10 +9,12 @@ JSON Schema (draft 2020-12) files for Probavi's two frozen contracts:
   payloads.
 - `evidence/record.json` — one evidence record as stored on a log line,
   covering every published schema version (`probavi-evidence/0` and `/1`).
+- `notification/payload.json` — the webhook notification body
+  (`probavi-notification/1`) receivers parse.
 
 The markdown specifications (`../adapter-protocol.md`,
-`../evidence-schema.md`) are **normative**; these schemas are derived from
-them, and on any disagreement the markdown wins. Properties the schemas
+`../evidence-schema.md`, `../notifications.md`) are **normative**; these
+schemas are derived from them, and on any disagreement the markdown wins. Properties the schemas
 cannot express — canonical byte form, hash chaining, signatures, framing,
 call ordering — live only in the markdown.
 

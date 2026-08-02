@@ -30,7 +30,7 @@ engine adapters      sandbox providers      ← both are PLUGGABLE axes
 evidence store (append-only, hash-chained, ed25519-signed)
                │
                ▼
-metrics / reports / audit export
+metrics / notifications / reports / audit export
 ```
 
 ### 2.1 The adapter contract (the most important decision)

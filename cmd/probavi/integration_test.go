@@ -4,12 +4,19 @@ package main_test
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -33,9 +40,22 @@ func TestFullDrillViaCLI(t *testing.T) {
 	keyPath := filepath.Join(work, "ed25519.key")
 	mustRun(t, ctx, probavi, "evidence", "keygen", "--out", keyPath)
 
+	// A webhook receiver observes both drills; the CLI subprocess inherits
+	// the URL and HMAC secret through the environment, never through config.
+	hook := &webhookCapture{}
+	hookSrv := httptest.NewServer(hook)
+	defer hookSrv.Close()
+	t.Setenv("PROBAVI_IT_WEBHOOK_URL", hookSrv.URL)
+	t.Setenv("PROBAVI_IT_WEBHOOK_SECRET", "it-webhook-secret")
+	notifyBlock := `notify:
+  webhooks:
+    - url_env: PROBAVI_IT_WEBHOOK_URL
+      secret_env: PROBAVI_IT_WEBHOOK_SECRET
+`
+
 	logPath := filepath.Join(work, "evidence.jsonl")
 	metricsPath := filepath.Join(work, "probavi.prom")
-	configPath := writeDrillConfig(t, work, fixture, logPath, keyPath, metricsPath)
+	configPath := writeDrillConfig(t, work, fixture, logPath, keyPath, metricsPath, notifyBlock)
 
 	// Drill 1: a healthy backup must prove restorable, exit 0.
 	out := mustRun(t, ctx, probavi, "run", "--config", configPath)
@@ -67,10 +87,48 @@ func TestFullDrillViaCLI(t *testing.T) {
 	if err := os.WriteFile(corrupt, []byte("not an archive"), 0o600); err != nil {
 		t.Fatalf("write corrupt dump: %v", err)
 	}
-	corruptConfig := writeDrillConfig(t, t.TempDir(), corrupt, logPath, keyPath, metricsPath)
+	corruptConfig := writeDrillConfig(t, t.TempDir(), corrupt, logPath, keyPath, metricsPath, notifyBlock)
 	out, code := run(t, ctx, probavi, "run", "--config", corruptConfig)
 	if code != 1 {
 		t.Fatalf("corrupt drill exit = %d (%s), want 1 — a bad backup is a recoverability failure", code, out)
+	}
+
+	// Both drills must have notified: pass then fail, HMAC-signed, pointing
+	// at the records just written (docs/notifications.md).
+	deliveries := hook.snapshot()
+	if len(deliveries) != 2 {
+		t.Fatalf("webhook received %d deliveries, want 2", len(deliveries))
+	}
+	for i, want := range []struct {
+		outcome string
+		seq     int64
+	}{{"pass", 1}, {"fail", 2}} {
+		d := deliveries[i]
+		if got := d.header.Get("X-Probavi-Event"); got != "drill.completed" {
+			t.Errorf("delivery %d: X-Probavi-Event = %q", i, got)
+		}
+		mac := hmac.New(sha256.New, []byte("it-webhook-secret"))
+		if _, err := mac.Write(d.body); err != nil {
+			t.Fatalf("hmac: %v", err)
+		}
+		if got := d.header.Get("X-Probavi-Signature-256"); got != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+			t.Errorf("delivery %d: signature %q does not verify against the shared secret", i, got)
+		}
+		payload := struct {
+			Schema  string `json:"schema"`
+			Outcome string `json:"outcome"`
+			Seq     int64  `json:"seq"`
+			Drill   struct {
+				Name string `json:"name"`
+			} `json:"drill"`
+		}{}
+		if err := json.Unmarshal(d.body, &payload); err != nil {
+			t.Fatalf("delivery %d payload: %v (%s)", i, err, d.body)
+		}
+		if payload.Schema != "probavi-notification/1" || payload.Outcome != want.outcome ||
+			payload.Seq != want.seq || payload.Drill.Name != "cli-e2e-drill" {
+			t.Errorf("delivery %d payload = %+v, want %s at seq %d", i, payload, want.outcome, want.seq)
+		}
 	}
 
 	// Offline verification: two records, chained, VALID, exit 0.
@@ -108,7 +166,35 @@ func TestFullDrillViaCLI(t *testing.T) {
 	}
 }
 
-func writeDrillConfig(t *testing.T, dir, source, logPath, keyPath, metricsPath string) string {
+// webhookCapture is a race-safe notification receiver.
+type webhookCapture struct {
+	mu         sync.Mutex
+	deliveries []webhookDelivery
+}
+
+type webhookDelivery struct {
+	header http.Header
+	body   []byte
+}
+
+func (c *webhookCapture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.deliveries = append(c.deliveries, webhookDelivery{header: r.Header.Clone(), body: body})
+}
+
+func (c *webhookCapture) snapshot() []webhookDelivery {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]webhookDelivery(nil), c.deliveries...)
+}
+
+func writeDrillConfig(t *testing.T, dir, source, logPath, keyPath, metricsPath, notify string) string {
 	t.Helper()
 	cfg := fmt.Sprintf(`target:
   name: cli-e2e-drill
@@ -139,6 +225,7 @@ evidence:
 metrics:
   prometheus_textfile: %s
 `, source, logPath, keyPath, metricsPath)
+	cfg += notify
 	path := filepath.Join(dir, "drill.yaml")
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write drill config: %v", err)

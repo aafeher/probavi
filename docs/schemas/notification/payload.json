@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/notification/payload.json",
+  "title": "Probavi notification payload (probavi-notification/1)",
+  "$comment": "Derived from docs/notifications.md, which is normative; on any disagreement the markdown document wins. Values are copied from the evidence record the notification announces, so shared shapes mirror docs/schemas/evidence/record.json.",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "probavi-notification/1" },
+    "event": { "const": "drill.completed" },
+    "ts": { "$ref": "#/$defs/tsMilliZ" },
+    "drill": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "config_hash": { "$ref": "#/$defs/sha256Ref" }
+      },
+      "required": ["name", "config_hash"],
+      "additionalProperties": false
+    },
+    "adapter": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "outcome": { "enum": ["pass", "fail", "error", "cancelled"] },
+    "seq": { "$ref": "#/$defs/int53", "minimum": 1 },
+    "checks_passed": { "$ref": "#/$defs/int53" },
+    "checks_total": { "$ref": "#/$defs/int53" },
+    "timings_ms": {
+      "type": "object",
+      "properties": {
+        "restore": { "$ref": "#/$defs/int53OrNull" },
+        "total": { "$ref": "#/$defs/int53OrNull" }
+      },
+      "required": ["restore", "total"],
+      "additionalProperties": false
+    },
+    "error": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "enum": [
+                "invalid_request",
+                "unsupported_protocol",
+                "unsupported_source",
+                "source_not_found",
+                "source_unreadable",
+                "source_corrupt",
+                "restore_failed",
+                "engine_not_ready",
+                "sandbox_error",
+                "timeout",
+                "cancelled",
+                "adapter_crash",
+                "internal",
+                "check_failed"
+              ],
+              "description": "Same registry as the evidence record: adapter-protocol §5 plus check_failed."
+            },
+            "message": { "type": "string", "maxLength": 512, "pattern": "^[^\\r\\n]*$" }
+          },
+          "required": ["code", "message"],
+          "additionalProperties": false
+        }
+      ],
+      "description": "null exactly when outcome is pass, mirroring the evidence record."
+    },
+    "probavi_version": { "type": "string", "minLength": 1 }
+  },
+  "required": [
+    "schema",
+    "event",
+    "ts",
+    "drill",
+    "adapter",
+    "outcome",
+    "seq",
+    "checks_passed",
+    "checks_total",
+    "timings_ms",
+    "error",
+    "probavi_version"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "$comment": "error is null exactly when outcome is pass (docs/notifications.md §5).",
+      "if": {
+        "properties": { "outcome": { "const": "pass" } },
+        "required": ["outcome"]
+      },
+      "then": { "properties": { "error": { "type": "null" } } },
+      "else": { "properties": { "error": { "type": "object" } } }
+    }
+  ],
+  "$defs": {
+    "sha256Ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "tsMilliZ": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "description": "RFC 3339 UTC with exactly millisecond precision and Z suffix."
+    },
+    "int53": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "int53OrNull": {
+      "oneOf": [{ "$ref": "#/$defs/int53" }, { "type": "null" }]
+    }
+  }
+}

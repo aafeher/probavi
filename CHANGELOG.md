@@ -13,6 +13,20 @@ always called out explicitly.
 
 ### Added
 
+- Webhook notifications (`notify` config section, docs/notifications.md):
+  one JSON POST per configured webhook after the evidence record is
+  signed, carrying the `probavi-notification/1` payload — a signpost to
+  the record (outcome, check counts, restore timing, sequence number),
+  never a substitute for it. URLs come from config or, for token-bearing
+  endpoints, from the environment (`url_env`) and are redacted from all
+  logs and errors; optional HMAC signing (`secret_env`,
+  `X-Probavi-Signature-256`) lets receivers authenticate pushes. An `on`
+  filter narrows delivery per outcome; the default — every outcome —
+  keeps dead-man's-switch receivers working. Delivery is bounded (60 s
+  budget, 3 attempts, no redirects), runs outside the drill timeout so
+  cancelled drills still notify, and never changes the drill's verdict
+  or exit code. The payload has a machine-readable schema
+  (`docs/schemas/notification/payload.json`) validated in CI.
 - SQL Server adapter (`adapters/mssql`, `probavi-adapter-mssql`):
   restores native `BACKUP DATABASE` artifacts (`bak`, `bak_dir` kinds)
   under the drill's target name, with the file list read from the backup
