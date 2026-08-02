@@ -83,7 +83,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] Finnish (`fi`) **Complete 2026-08-02: `internal/i18n/locales/fi.json`, all 76 messages, §4 gates green; informal imperative, drill → harjoitus, adapter → sovitin, evidence terms as todiste compounds (todistetietue / todisteloki / todisteskeema).**
   - [x] Slovak (`sk`) **Complete 2026-08-02: `internal/i18n/locales/sk.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → cvičenie, evidence terms as dôkaz compounds (dôkazový záznam / dôkazový log / schéma dôkazov), „pole X je povinné" for gender-safe required-field lines.**
   - [x] Croatian (`hr`) **Complete 2026-08-02: `internal/i18n/locales/hr.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → vježba, outcome → ishod, conformance → sukladnost, evidence terms as dokaz compounds (dokazni zapis / dokazni dnevnik / shema dokaza), „polje X je obavezno" for gender-safe required-field lines.**
-  - [ ] Lithuanian (`lt`)
+  - [x] Lithuanian (`lt`) **Complete 2026-08-02: `internal/i18n/locales/lt.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → pratybos (plurale tantum, „vienerios" numeral), evidence terms as įrodymas compounds (įrodymo įrašas / įrodymų žurnalas / įrodymų schema), „laukas X yra privalomas" for gender-safe required-field lines.**
   - [ ] Slovenian (`sl`)
   - [ ] Latvian (`lv`)
   - [ ] Estonian (`et`)
