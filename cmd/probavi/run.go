@@ -62,7 +62,7 @@ func runDrill(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	summary, code := executeDrill(ctx, *configPath, logger, stderr, "probavi run")
+	summary, code := executeDrill(ctx, *configPath, logger, stderr, "probavi run", tr)
 	if code == exitPass || code == exitFail || code == exitError {
 		if err := json.NewEncoder(stdout).Encode(summary); err != nil {
 			tr.Fprintf(stderr, msgRunEncodeSummary, err)
@@ -75,8 +75,8 @@ func runDrill(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 // the drill itself under its configured wall-clock limit, metrics, and
 // notifications — and returns the machine summary with the run exit code.
 // Both `probavi run` and game-day members go through this path.
-func executeDrill(parent context.Context, configPath string, logger *slog.Logger, stderr io.Writer, errPrefix string) (gameday.DrillSummary, int) {
-	drill, notifier, evidencePath, cleanup, err := wireDrill(configPath, logger)
+func executeDrill(parent context.Context, configPath string, logger *slog.Logger, stderr io.Writer, errPrefix string, tr *i18n.T) (gameday.DrillSummary, int) {
+	drill, notifier, evidencePath, cleanup, err := wireDrill(configPath, logger, tr)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", errPrefix, err)
 		return gameday.DrillSummary{}, exitUsage
@@ -139,7 +139,7 @@ func runGameDay(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 
-	cfg, err := config.LoadGameDay(*configPath)
+	cfg, err := config.LoadGameDay(*configPath, tr)
 	if err != nil {
 		fmt.Fprintf(stderr, "probavi gameday: %v\n", err)
 		return exitUsage
@@ -152,7 +152,7 @@ func runGameDay(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 
 	runner := func(ctx context.Context, member config.GameDayMember) gameday.DrillSummary {
 		summary, code := executeDrill(ctx, member.Config, logger.With("member", member.Name), stderr,
-			"probavi gameday: member "+member.Name)
+			"probavi gameday: member "+member.Name, tr)
 		switch code {
 		case exitUsage:
 			return gameday.DrillSummary{Outcome: string(evidence.OutcomeError), ErrorCode: gameday.ErrCodeSetup}
@@ -191,8 +191,8 @@ func gamedayExit(s *gameday.Summary) int {
 // evidence store, adapter runner, sandbox provider. The notifier is wired
 // first so an unresolvable webhook environment variable aborts before any
 // long-running work.
-func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, *notify.Notifier, string, func(), error) {
-	cfg, err := config.Load(configPath)
+func wireDrill(configPath string, logger *slog.Logger, tr *i18n.T) (*core.Drill, *notify.Notifier, string, func(), error) {
+	cfg, err := config.Load(configPath, tr)
 	if err != nil {
 		return nil, nil, "", nil, err
 	}

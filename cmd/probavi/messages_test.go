@@ -6,8 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aafeher/probavi/internal/config"
 	"github.com/aafeher/probavi/internal/i18n"
 )
+
+// translatable is the full message set the catalogs are held to: the CLI
+// surface plus every package that emits translated diagnostics.
+func translatable() []string {
+	return append(append([]string{}, allMessages...), config.Messages()...)
+}
 
 // verbPattern extracts fmt verbs; translations must carry the same verbs
 // in the same order (docs/i18n.md §3).
@@ -30,7 +37,7 @@ func TestCatalogGates(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Catalog(%s): %v", tag, err)
 			}
-			for _, msg := range allMessages {
+			for _, msg := range translatable() {
 				assertTranslated(t, catalog, msg)
 			}
 			assertNoStaleKeys(t, catalog)
@@ -61,8 +68,9 @@ func assertTranslated(t *testing.T, catalog map[string]string, msg string) {
 
 func assertNoStaleKeys(t *testing.T, catalog map[string]string) {
 	t.Helper()
-	known := make(map[string]bool, len(allMessages))
-	for _, m := range allMessages {
+	msgs := translatable()
+	known := make(map[string]bool, len(msgs))
+	for _, m := range msgs {
 		known[m] = true
 	}
 	for key := range catalog {

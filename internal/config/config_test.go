@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aafeher/probavi/internal/i18n"
 )
 
 // validYAML is a minimal drill config that must pass validation; invalid
@@ -42,9 +44,9 @@ func writeConfig(t *testing.T, content string) string {
 func TestLoadExampleConfig(t *testing.T) {
 	// The committed example must always parse and validate: this test is
 	// what keeps README/examples honest (AGENTS.md §5.5).
-	cfg, err := Load(filepath.Join("..", "..", "examples", "drill.example.yaml"))
+	cfg, err := Load(filepath.Join("..", "..", "examples", "drill.example.yaml"), nil)
 	if err != nil {
-		t.Fatalf("Load(examples/drill.example.yaml): %v", err)
+		t.Fatalf("Load(examples/drill.example.yaml, nil): %v", err)
 	}
 	if cfg.Target.Name != "prod-orders-db" || cfg.Target.Adapter != "postgres" {
 		t.Errorf("target = %+v, want prod-orders-db/postgres", cfg.Target)
@@ -94,7 +96,7 @@ func assertExampleNotify(t *testing.T, cfg *Config) {
 
 func TestLoadComputesConfigHash(t *testing.T) {
 	path := writeConfig(t, validYAML)
-	cfg, err := Load(path)
+	cfg, err := Load(path, nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -163,7 +165,7 @@ func TestLoadRejects(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Load(writeConfig(t, tt.yaml))
+			_, err := Load(writeConfig(t, tt.yaml), nil)
 			if err == nil {
 				t.Fatal("Load accepted an invalid config")
 			}
@@ -181,7 +183,7 @@ func TestPITRResolve(t *testing.T) {
 
 	abs := strings.Replace(validYAML, "adapter: postgres",
 		"adapter: postgres\n  pitr:\n    target_time: \"2026-07-30T14:32:00+02:00\"", 1)
-	cfg, err := Load(writeConfig(t, abs))
+	cfg, err := Load(writeConfig(t, abs), nil)
 	if err != nil {
 		t.Fatalf("Load absolute pitr: %v", err)
 	}
@@ -192,7 +194,7 @@ func TestPITRResolve(t *testing.T) {
 
 	rel := strings.Replace(validYAML, "adapter: postgres",
 		"adapter: postgres\n  pitr:\n    target_age: 24h", 1)
-	cfg, err = Load(writeConfig(t, rel))
+	cfg, err = Load(writeConfig(t, rel), nil)
 	if err != nil {
 		t.Fatalf("Load relative pitr: %v", err)
 	}
@@ -201,11 +203,38 @@ func TestPITRResolve(t *testing.T) {
 	}
 }
 
+// TestLoadHungarianDiagnostics proves validation diagnostics speak the
+// injected translator's language end to end (docs/i18n.md).
+func TestLoadHungarianDiagnostics(t *testing.T) {
+	hu, err := i18n.New("hu")
+	if err != nil {
+		t.Fatalf("New(hu): %v", err)
+	}
+	bad := strings.Replace(validYAML, "name: test-db", `name: ""`, 1)
+	_, err = Load(writeConfig(t, bad), hu)
+	if err == nil {
+		t.Fatal("Load accepted an invalid config")
+	}
+	for _, want := range []string{"érvénytelen konfiguráció", "a target.name megadása kötelező"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "target.name is required") {
+		t.Errorf("error %q still contains English", err)
+	}
+
+	if _, err := LoadGameDay(writeGameDay(t, "name: gd\ntimeout: 1h\nmembers: []\n"), hu); err == nil ||
+		!strings.Contains(err.Error(), "legalább egy tag szükséges") {
+		t.Errorf("game-day error = %v, want Hungarian member diagnostic", err)
+	}
+}
+
 func TestLoadReportsAllProblemsAtOnce(t *testing.T) {
 	bad := strings.Replace(validYAML, "name: test-db", "name: \"\"", 1)
 	bad = strings.Replace(bad, "provider: docker", "provider: \"\"", 1)
 	bad = strings.Replace(bad, "sign_key: /etc/probavi/ed25519.key", "sign_key: \"\"", 1)
-	_, err := Load(writeConfig(t, bad))
+	_, err := Load(writeConfig(t, bad), nil)
 	if err == nil {
 		t.Fatal("Load accepted an invalid config")
 	}
@@ -217,13 +246,13 @@ func TestLoadReportsAllProblemsAtOnce(t *testing.T) {
 }
 
 func TestLoadFileProblems(t *testing.T) {
-	if _, err := Load(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
+	if _, err := Load(filepath.Join(t.TempDir(), "missing.yaml"), nil); err == nil {
 		t.Error("Load accepted a missing file")
 	}
-	if _, err := Load(writeConfig(t, "")); err == nil || !strings.Contains(err.Error(), "empty") {
+	if _, err := Load(writeConfig(t, ""), nil); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Errorf("empty config: got %v, want empty-config error", err)
 	}
-	if _, err := Load(writeConfig(t, "target: [broken\n")); err == nil {
+	if _, err := Load(writeConfig(t, "target: [broken\n"), nil); err == nil {
 		t.Error("Load accepted broken YAML syntax")
 	}
 }
@@ -244,7 +273,7 @@ func TestScalarNormalization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.yaml, func(t *testing.T) {
 			y := strings.Replace(validYAML, "- builtin: service_healthy", "- sql: SELECT 1\n    "+tt.yaml, 1)
-			cfg, err := Load(writeConfig(t, y))
+			cfg, err := Load(writeConfig(t, y), nil)
 			if err != nil {
 				t.Fatalf("Load: %v", err)
 			}
