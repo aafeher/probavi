@@ -13,6 +13,23 @@ always called out explicitly.
 
 ### Added
 
+- DR game-day orchestration (`probavi gameday`, spec docs/gameday.md):
+  multi-database restore exercises in dependency order. A game-day
+  config references normal drill files as members with `depends_on`
+  edges; each member runs the full drill pipeline — sandbox, restore,
+  checks, its own signed evidence record, metrics, notifications — so
+  the evidence schema is untouched and members stay independently
+  runnable. Dependents of a failed member are skipped with a recorded
+  reason (cascading), independent branches always run to completion,
+  and cancellation leaves signed `cancelled` records for running
+  members. Execution is sequential by default; `max_parallel` opts in
+  to bounded concurrency, with a load-time guard rejecting members
+  that share an evidence log while allowed to overlap. The one-line
+  JSON summary lists every member with its record location
+  (evidence path + seq) and reports the end-to-end wall clock — the
+  service-level recovery time. Exit codes: 0 all passed, 1 a member
+  drill failed, 2 errors/cancellation left members unproven, 5 a
+  member's record could not be written.
 - Webhook notifications (`notify` config section, docs/notifications.md):
   one JSON POST per configured webhook after the evidence record is
   signed, carrying the `probavi-notification/1` payload — a signpost to

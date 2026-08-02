@@ -1,0 +1,20 @@
+# Example Probavi DR game-day configuration (docs/gameday.md).
+# A game-day = one orchestrated exercise of several restore drills in
+# dependency order, measuring the service-level recovery wall clock.
+# This file is loaded by the config test suite, so it cannot drift from
+# the real schema.
+
+name: shop-stack
+timeout: 2h            # hard wall clock for the whole exercise (required)
+# max_parallel: 2      # optional; default 1 = strictly sequential
+
+members:
+  # Each member references a normal drill configuration file (path
+  # relative to this file) and stays independently runnable from cron.
+  # Both members point at the same example drill here so the file is
+  # self-contained; in reality each database has its own drill file.
+  - name: orders-db
+    config: drill.example.yaml
+  - name: reporting-db
+    config: drill.example.yaml
+    depends_on: [orders-db]   # starts only after orders-db passes

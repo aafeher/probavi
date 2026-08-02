@@ -219,6 +219,24 @@ notify:
 
 The payload (`probavi-notification/1`) is a signpost to the signed record — outcome, check counts, restore timing, and the sequence number to verify — never a substitute for it, and delivery failures are logged but never change the drill's verdict or exit code. Slack, email, and dead-man's-switch services are recipes on top of the plain webhook; the payload contract, delivery semantics, and recipes live in [`docs/notifications.md`](docs/notifications.md).
 
+## DR game-days
+
+A single drill proves one database restores; a **game-day** proves a whole service comes back, in the right order, and measures the end-to-end recovery wall clock:
+
+```yaml
+# gameday.yaml
+name: shop-stack
+timeout: 2h
+members:
+  - name: auth-db
+    config: drills/auth.yaml          # a normal drill file — stays runnable from cron
+  - name: orders-db
+    config: drills/orders.yaml
+    depends_on: [auth-db]             # starts only after auth-db passes
+```
+
+`probavi gameday --config gameday.yaml` runs each member through the full drill pipeline — every member leaves its own signed evidence record, exactly as if run standalone. Dependents of a failed member are skipped (restoring an app database against an unrecoverable auth database proves nothing), independent branches always run to completion, and the one-line JSON summary points at every record written (`seq` + evidence path) plus the total wall clock — the number a DR plan calls the service-level recovery time. Execution is sequential by default (`max_parallel` opts in to concurrency); semantics, summary contract, and exit codes live in [`docs/gameday.md`](docs/gameday.md).
+
 ## Design principles
 
 - **Build on top of backup tools, never replace them.** Probavi orchestrates and verifies; pgBackRest and friends keep doing what they do best.

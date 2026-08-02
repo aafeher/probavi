@@ -55,7 +55,7 @@ func TestFullDrillViaCLI(t *testing.T) {
 
 	logPath := filepath.Join(work, "evidence.jsonl")
 	metricsPath := filepath.Join(work, "probavi.prom")
-	configPath := writeDrillConfig(t, work, fixture, logPath, keyPath, metricsPath, notifyBlock)
+	configPath := writeDrillConfig(t, work, "cli-e2e-drill", fixture, logPath, keyPath, metricsPath, notifyBlock)
 
 	// Drill 1: a healthy backup must prove restorable, exit 0.
 	out := mustRun(t, ctx, probavi, "run", "--config", configPath)
@@ -87,7 +87,7 @@ func TestFullDrillViaCLI(t *testing.T) {
 	if err := os.WriteFile(corrupt, []byte("not an archive"), 0o600); err != nil {
 		t.Fatalf("write corrupt dump: %v", err)
 	}
-	corruptConfig := writeDrillConfig(t, t.TempDir(), corrupt, logPath, keyPath, metricsPath, notifyBlock)
+	corruptConfig := writeDrillConfig(t, t.TempDir(), "cli-e2e-drill", corrupt, logPath, keyPath, metricsPath, notifyBlock)
 	out, code := run(t, ctx, probavi, "run", "--config", corruptConfig)
 	if code != 1 {
 		t.Fatalf("corrupt drill exit = %d (%s), want 1 — a bad backup is a recoverability failure", code, out)
@@ -166,6 +166,111 @@ func TestFullDrillViaCLI(t *testing.T) {
 	}
 }
 
+// TestGameDayViaCLI proves the DR game-day path end to end: three member
+// drills — healthy, corrupt, and a dependent of the corrupt one — run in
+// dependency order against real Docker, chain their records into one
+// shared evidence log, and produce the docs/gameday.md §5 summary with
+// the dependent skipped.
+func TestGameDayViaCLI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	work := t.TempDir()
+
+	probavi := build(t, ctx, work, "probavi", ".")
+	build(t, ctx, work, "probavi-adapter-postgres", "../../adapters/postgres")
+	t.Setenv("PATH", work+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	fixture := filepath.Join(work, "orders.dump")
+	makeFixture(t, ctx, fixture)
+	corrupt := filepath.Join(work, "corrupt.dump")
+	if err := os.WriteFile(corrupt, []byte("not an archive"), 0o600); err != nil {
+		t.Fatalf("write corrupt dump: %v", err)
+	}
+
+	keyPath := filepath.Join(work, "ed25519.key")
+	mustRun(t, ctx, probavi, "evidence", "keygen", "--out", keyPath)
+	logPath := filepath.Join(work, "evidence.jsonl")
+
+	// Members live in subdirectories; the game-day references them by
+	// relative path, proving the resolution rule.
+	members := []struct{ dir, name, source string }{
+		{"m1", "gd-core-db", fixture},
+		{"m2", "gd-corrupt-db", corrupt},
+		{"m3", "gd-reporting-db", fixture},
+	}
+	for _, m := range members {
+		sub := filepath.Join(work, m.dir)
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", sub, err)
+		}
+		writeDrillConfig(t, sub, m.name, m.source, logPath, keyPath, filepath.Join(sub, "probavi.prom"), "")
+	}
+	gdPath := filepath.Join(work, "gameday.yaml")
+	gd := `name: gd-e2e
+timeout: 6m
+members:
+  - name: core-db
+    config: m1/drill.yaml
+  - name: corrupt-db
+    config: m2/drill.yaml
+  - name: reporting-db
+    config: m3/drill.yaml
+    depends_on: [corrupt-db]
+`
+	if err := os.WriteFile(gdPath, []byte(gd), 0o600); err != nil {
+		t.Fatalf("write game-day config: %v", err)
+	}
+
+	out, code := run(t, ctx, probavi, "gameday", "--config", gdPath)
+	if code != 1 {
+		t.Fatalf("game-day exit = %d (%s), want 1 — one member drill failed", code, out)
+	}
+	summary := struct {
+		GameDay string `json:"gameday"`
+		Outcome string `json:"outcome"`
+		TotalMS int64  `json:"total_ms"`
+		Members []struct {
+			Name       string `json:"name"`
+			Outcome    string `json:"outcome"`
+			Seq        int64  `json:"seq"`
+			SkipReason string `json:"skip_reason"`
+			DurationMS int64  `json:"duration_ms"`
+		} `json:"members"`
+	}{}
+	if err := json.Unmarshal([]byte(out), &summary); err != nil {
+		t.Fatalf("game-day summary is not JSON: %v (%q)", err, out)
+	}
+	if summary.GameDay != "gd-e2e" || summary.Outcome != "fail" || len(summary.Members) != 3 {
+		t.Fatalf("summary = %+v, want gd-e2e fail with 3 members", summary)
+	}
+	if m := summary.Members[0]; m.Outcome != "pass" || m.Seq != 1 || m.DurationMS <= 0 {
+		t.Errorf("core-db = %+v, want pass at seq 1 with measured duration", m)
+	}
+	if m := summary.Members[1]; m.Outcome != "fail" || m.Seq != 2 {
+		t.Errorf("corrupt-db = %+v, want fail at seq 2", m)
+	}
+	if m := summary.Members[2]; m.Outcome != "skipped" || !strings.Contains(m.SkipReason, "corrupt-db did not pass (fail)") {
+		t.Errorf("reporting-db = %+v, want skipped behind corrupt-db", m)
+	}
+	if summary.TotalMS <= 0 {
+		t.Errorf("total_ms = %d, want the exercise wall clock", summary.TotalMS)
+	}
+
+	// The shared log chained both member records in execution order and
+	// verifies offline; the skipped member correctly left no record.
+	out = mustRun(t, ctx, probavi, "evidence", "verify", "--log", logPath, "--key", keyPath+".pub")
+	verify := struct {
+		Status  string `json:"status"`
+		Records int    `json:"records"`
+	}{}
+	if err := json.Unmarshal([]byte(out), &verify); err != nil {
+		t.Fatalf("verify output: %v", err)
+	}
+	if verify.Status != "VALID" || verify.Records != 2 {
+		t.Fatalf("verify = %+v, want VALID with exactly 2 records", verify)
+	}
+}
+
 // webhookCapture is a race-safe notification receiver.
 type webhookCapture struct {
 	mu         sync.Mutex
@@ -194,10 +299,10 @@ func (c *webhookCapture) snapshot() []webhookDelivery {
 	return append([]webhookDelivery(nil), c.deliveries...)
 }
 
-func writeDrillConfig(t *testing.T, dir, source, logPath, keyPath, metricsPath, notify string) string {
+func writeDrillConfig(t *testing.T, dir, name, source, logPath, keyPath, metricsPath, notify string) string {
 	t.Helper()
 	cfg := fmt.Sprintf(`target:
-  name: cli-e2e-drill
+  name: %s
   adapter: postgres
   source:
     kind: pgdump
@@ -224,7 +329,7 @@ evidence:
   sign_key: %s
 metrics:
   prometheus_textfile: %s
-`, source, logPath, keyPath, metricsPath)
+`, name, source, logPath, keyPath, metricsPath)
 	cfg += notify
 	path := filepath.Join(dir, "drill.yaml")
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/aafeher/probavi/internal/conformance"
 	"github.com/aafeher/probavi/internal/core"
 	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/aafeher/probavi/internal/gameday"
 	"github.com/aafeher/probavi/internal/metrics"
 	"github.com/aafeher/probavi/internal/notify"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
@@ -42,18 +43,6 @@ const (
 	exitEvidenceLost = 5
 )
 
-// runSummary is the machine-readable drill summary printed on stdout.
-type runSummary struct {
-	Outcome      string `json:"outcome"`
-	Seq          int64  `json:"seq"`
-	EvidencePath string `json:"evidence_path"`
-	ChecksPassed int    `json:"checks_passed"`
-	ChecksTotal  int    `json:"checks_total"`
-	RestoreMS    *int64 `json:"restore_ms"`
-	TotalMS      *int64 `json:"total_ms"`
-	ErrorCode    string `json:"error_code,omitempty"`
-}
-
 func runDrill(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -67,24 +56,39 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 	}
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
 
-	drill, notifier, evidencePath, cleanup, err := wireDrill(*configPath, logger)
+	// SIGTERM and Ctrl-C turn into a cancelled drill with a signed record,
+	// not a crash.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	summary, code := executeDrill(ctx, *configPath, logger, stderr, "probavi run")
+	if code == exitPass || code == exitFail || code == exitError {
+		if err := json.NewEncoder(stdout).Encode(summary); err != nil {
+			fmt.Fprintf(stderr, "probavi run: encode summary: %v\n", err)
+		}
+	}
+	return code
+}
+
+// executeDrill runs the full drill pipeline for one config file — wiring,
+// the drill itself under its configured wall-clock limit, metrics, and
+// notifications — and returns the machine summary with the run exit code.
+// Both `probavi run` and game-day members go through this path.
+func executeDrill(parent context.Context, configPath string, logger *slog.Logger, stderr io.Writer, errPrefix string) (gameday.DrillSummary, int) {
+	drill, notifier, evidencePath, cleanup, err := wireDrill(configPath, logger)
 	if err != nil {
-		fmt.Fprintf(stderr, "probavi run: %v\n", err)
-		return exitUsage
+		fmt.Fprintf(stderr, "%s: %v\n", errPrefix, err)
+		return gameday.DrillSummary{}, exitUsage
 	}
 	defer cleanup()
 
-	// The drill's hard wall-clock limit comes from the config; SIGTERM and
-	// Ctrl-C turn into a cancelled drill with a signed record, not a crash.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, drill.Config.Sandbox.Timeout.Std())
+	ctx, cancel := context.WithTimeout(parent, drill.Config.Sandbox.Timeout.Std())
 	defer cancel()
 
 	rec, err := drill.Run(ctx)
 	if err != nil {
-		fmt.Fprintf(stderr, "probavi run: %v\n", err)
-		return exitEvidenceLost
+		fmt.Fprintf(stderr, "%s: %v\n", errPrefix, err)
+		return gameday.DrillSummary{}, exitEvidenceLost
 	}
 	if drill.Config.Metrics != nil {
 		// Metrics are observability, not evidence: failures are loud but
@@ -97,9 +101,6 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 			logger.Error("write metrics textfile", "err", merr)
 		}
 	}
-	if err := json.NewEncoder(stdout).Encode(summarize(rec, evidencePath)); err != nil {
-		fmt.Fprintf(stderr, "probavi run: encode summary: %v\n", err)
-	}
 	if notifier != nil {
 		// Notifications are observability, not evidence: they run on their
 		// own budget — deliberately not derived from the drill context, so a
@@ -111,10 +112,74 @@ func runDrill(args []string, stdout, stderr io.Writer) int {
 		}
 		ncancel()
 	}
+	summary := summarize(rec, evidencePath)
 	switch rec.Outcome {
 	case evidence.OutcomePass:
-		return exitPass
+		return summary, exitPass
 	case evidence.OutcomeFail:
+		return summary, exitFail
+	default:
+		return summary, exitError
+	}
+}
+
+// runGameDay implements `probavi gameday`: a multi-database restore
+// exercise in dependency order (docs/gameday.md).
+func runGameDay(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("gameday", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "path to the game-day configuration YAML (required)")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if *configPath == "" {
+		fmt.Fprintln(stderr, "probavi gameday: --config is required")
+		return exitUsage
+	}
+	logger := slog.New(slog.NewTextHandler(stderr, nil))
+
+	cfg, err := config.LoadGameDay(*configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "probavi gameday: %v\n", err)
+		return exitUsage
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout.Std())
+	defer cancel()
+
+	runner := func(ctx context.Context, member config.GameDayMember) gameday.DrillSummary {
+		summary, code := executeDrill(ctx, member.Config, logger.With("member", member.Name), stderr,
+			"probavi gameday: member "+member.Name)
+		switch code {
+		case exitUsage:
+			return gameday.DrillSummary{Outcome: string(evidence.OutcomeError), ErrorCode: gameday.ErrCodeSetup}
+		case exitEvidenceLost:
+			return gameday.DrillSummary{Outcome: string(evidence.OutcomeError), ErrorCode: gameday.ErrCodeEvidenceLost}
+		default:
+			return summary
+		}
+	}
+	summary := gameday.Run(ctx, cfg, runner, logger)
+	if err := json.NewEncoder(stdout).Encode(summary); err != nil {
+		fmt.Fprintf(stderr, "probavi gameday: encode summary: %v\n", err)
+	}
+	return gamedayExit(summary)
+}
+
+// gamedayExit maps the summary to the §6 exit codes: a lost evidence
+// record dominates everything, then the recoverability verdict.
+func gamedayExit(s *gameday.Summary) int {
+	for i := range s.Members {
+		if s.Members[i].DrillSummary != nil && s.Members[i].ErrorCode == gameday.ErrCodeEvidenceLost {
+			return exitEvidenceLost
+		}
+	}
+	switch s.Outcome {
+	case string(evidence.OutcomePass):
+		return exitPass
+	case string(evidence.OutcomeFail):
 		return exitFail
 	default:
 		return exitError
@@ -177,14 +242,14 @@ func wireDrill(configPath string, logger *slog.Logger) (*core.Drill, *notify.Not
 	return drill, notifier, cfg.Evidence.Path, cleanup, nil
 }
 
-func summarize(rec *evidence.Record, evidencePath string) runSummary {
+func summarize(rec *evidence.Record, evidencePath string) gameday.DrillSummary {
 	passed := 0
 	for _, c := range rec.Checks {
 		if c.OK {
 			passed++
 		}
 	}
-	s := runSummary{
+	s := gameday.DrillSummary{
 		Outcome:      string(rec.Outcome),
 		Seq:          rec.Seq,
 		EvidencePath: evidencePath,

@@ -217,6 +217,9 @@ func TestUsageErrors(t *testing.T) {
 		{"keygen without out", []string{"evidence", "keygen"}},
 		{"keygen bad flag", []string{"evidence", "keygen", "--no-such-flag"}},
 		{"keygen uncreatable path", []string{"evidence", "keygen", "--out", filepath.Join(missing, "sub", "k")}},
+		{"gameday without config", []string{"gameday"}},
+		{"gameday bad flag", []string{"gameday", "--no-such-flag"}},
+		{"gameday missing file", []string{"gameday", "--config", missing}},
 		{"adapter without subcommand", []string{"adapter"}},
 		{"adapter unknown subcommand", []string{"adapter", "fuzz"}},
 		{"conformance without adapter", []string{"adapter", "conformance"}},
@@ -231,6 +234,80 @@ func TestUsageErrors(t *testing.T) {
 				t.Errorf("exit %d, want %d (stderr: %s)", code, exitUsage, stderr)
 			}
 		})
+	}
+}
+
+// TestGameDayMemberSetupErrorAndSkip drives `probavi gameday` end to end
+// without a container runtime: the first member cannot be wired (its
+// adapter binary does not exist), so it reports a setup error, its
+// dependent is skipped, and the exercise exits 2 with the full summary
+// on stdout.
+func TestGameDayMemberSetupErrorAndSkip(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "ed25519.key")
+	if code, _, stderr := runCLI(t, "evidence", "keygen", "--out", keyPath); code != 0 {
+		t.Fatalf("keygen exit %d, stderr: %s", code, stderr)
+	}
+	drill := `target:
+  name: gd-unit-test
+  adapter: no-such-engine
+  source:
+    kind: pgdump
+    path: /backups/test.dump
+sandbox:
+  provider: docker
+  timeout: 5m
+checks:
+  - builtin: service_healthy
+evidence:
+  path: ` + filepath.Join(dir, "evidence.jsonl") + `
+  sign_key: ` + keyPath + `
+`
+	if err := os.WriteFile(filepath.Join(dir, "member.yaml"), []byte(drill), 0o600); err != nil {
+		t.Fatalf("write member config: %v", err)
+	}
+	gameday := `name: gd-unit
+timeout: 10m
+members:
+  - name: alpha
+    config: member.yaml
+  - name: beta
+    config: member.yaml
+    depends_on: [alpha]
+`
+	gdPath := filepath.Join(dir, "gameday.yaml")
+	if err := os.WriteFile(gdPath, []byte(gameday), 0o600); err != nil {
+		t.Fatalf("write game-day config: %v", err)
+	}
+
+	code, stdout, stderr := runCLI(t, "gameday", "--config", gdPath)
+	if code != exitInvalid { // 2: errors left members unproven, nothing failed outright
+		t.Fatalf("exit %d, want 2 (stderr: %s)", code, stderr)
+	}
+	summary := struct {
+		GameDay string `json:"gameday"`
+		Outcome string `json:"outcome"`
+		Members []struct {
+			Name       string `json:"name"`
+			Outcome    string `json:"outcome"`
+			ErrorCode  string `json:"error_code"`
+			SkipReason string `json:"skip_reason"`
+		} `json:"members"`
+	}{}
+	if err := json.Unmarshal([]byte(stdout), &summary); err != nil {
+		t.Fatalf("summary is not JSON: %v (%q)", err, stdout)
+	}
+	if summary.GameDay != "gd-unit" || summary.Outcome != "error" || len(summary.Members) != 2 {
+		t.Fatalf("summary = %+v, want gd-unit error with 2 members", summary)
+	}
+	if m := summary.Members[0]; m.Outcome != "error" || m.ErrorCode != "setup_error" {
+		t.Errorf("alpha = %+v, want error/setup_error", m)
+	}
+	if m := summary.Members[1]; m.Outcome != "skipped" || !strings.Contains(m.SkipReason, "alpha did not pass (error)") {
+		t.Errorf("beta = %+v, want skipped behind alpha", m)
+	}
+	if !strings.Contains(stderr, "member alpha") {
+		t.Errorf("stderr should attribute the wiring failure to member alpha, got: %s", stderr)
 	}
 }
 
