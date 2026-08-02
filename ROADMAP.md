@@ -88,7 +88,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] Latvian (`lv`) **Complete 2026-08-02: `internal/i18n/locales/lv.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → mācības (pluralia-tantum agreement throughout), sandbox → smilškaste, evidence terms as pierādījumu compounds (pierādījumu ieraksts / žurnāls / shēma), debitive mood in the "must be set" diagnostics.**
   - [x] Estonian (`et`) **Complete 2026-08-02: `internal/i18n/locales/et.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → õppus, sandbox → liivakast, evidence terms as tõendi- compounds (tõendikirje / tõendilogi / tõendiskeem), the `on` config key quoted in diagnostics so it is not read as the verb "on".**
   - [x] Maltese (`mt`) **Complete 2026-08-02: `internal/i18n/locales/mt.json`, all 76 messages, §4 gates green; singular imperative per Maltese localization convention, drill → eżerċizzju, evidence → evidenza (rekord / reġistru / skema ta' evidenza), definite-article assimilation checked throughout, invented -bbiltà abstractions avoided.**
-  - [ ] Irish (`ga`)
+  - [x] Irish (`ga`) **Complete 2026-08-02: `internal/i18n/locales/ga.json`, all 76 messages, §4 gates green; drill → cleachtadh, adapter → cuibheoir, evidence → fianaise (taifead / loga / scéimre fianaise), diagnostics rephrased wherever an Irish preposition would have lenited or eclipsed a literal config key.**
 - [ ] Evaluate hosted/managed offering (business decision, out of scope for the OSS core).
 
 ## Deliberate non-goals (all phases)
