@@ -79,7 +79,7 @@ Order matters. Each phase has an explicit exit criterion; do not start the next 
   - [x] Czech (`cs`) **Complete 2026-08-02: `internal/i18n/locales/cs.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → cvičení, evidence terms as důkaz compounds (důkazní záznam / důkazní log / schéma důkazů), „pole X je povinné" for gender-safe required-field lines.**
   - [x] Swedish (`sv`) **Complete 2026-08-02: `internal/i18n/locales/sv.json`, all 76 messages, §4 gates green; informal imperative, drill → övning, outcome → utfall, evidence terms as bevis compounds (bevispost / bevislogg / bevisschema).**
   - [x] Bulgarian (`bg`) **Complete 2026-08-02: `internal/i18n/locales/bg.json`, all 76 messages, §4 gates green; polite-plural imperatives, drill → учение, evidence terms as доказателство compounds (доказателствен запис / доказателствен журнал / схема на доказателствата), „полето X е задължително" for gender-safe required-field lines.**
-  - [ ] Danish (`da`)
+  - [x] Danish (`da`) **Complete 2026-08-02: `internal/i18n/locales/da.json`, all 76 messages, §4 gates green; informal imperative, drill → øvelse, outcome → udfald, evidence terms as bevis compounds (bevispost / bevislog / bevisskema).**
   - [ ] Finnish (`fi`)
   - [ ] Slovak (`sk`)
   - [ ] Croatian (`hr`)
