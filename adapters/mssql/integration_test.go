@@ -14,24 +14,41 @@ import (
 	"time"
 
 	"github.com/aafeher/probavi/internal/adapter"
+	"github.com/aafeher/probavi/internal/capabilities"
 	"github.com/aafeher/probavi/internal/sandbox"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
 )
 
 const (
-	mssqlImage = "mcr.microsoft.com/mssql/server:2022-latest"
 	// seedPassword is only for the throwaway seed engine this test starts
 	// to produce a fixture; the drill engine uses the adapter's documented
 	// sandbox constant.
 	seedPassword = "Probavi!Seed0"
 )
 
+// verifiedImage is the engine image adapter.json declares this adapter
+// verified against. The manifest and this suite read the same value, so
+// docs/capabilities.json can never claim an engine version CI does not
+// actually restore from (docs/capabilities.md §1).
+func verifiedImage(t *testing.T) string {
+	t.Helper()
+	m, err := capabilities.LoadAdapterManifest(".")
+	if err != nil {
+		t.Fatalf("load adapter manifest: %v", err)
+	}
+	image, err := m.VerifiedImage()
+	if err != nil {
+		t.Fatalf("adapter manifest: %v", err)
+	}
+	return image
+}
+
 // sandboxParams returns the documented drill-config sandbox params: the
 // image starts idle (SQL Server cannot run without a superuser password,
 // and a password in sandbox params would enter the signed evidence record
 // — so the adapter starts and owns the engine).
-func sandboxParams() map[string]string {
-	return map[string]string{"image": mssqlImage, "command": "sleep infinity"}
+func sandboxParams(t *testing.T) map[string]string {
+	return map[string]string{"image": verifiedImage(t), "command": "sleep infinity"}
 }
 
 // TestEndToEndRestoreDrill proves the fourth engine through the unchanged
@@ -51,7 +68,7 @@ func TestEndToEndRestoreDrill(t *testing.T) {
 	fixture := filepath.Join(t.TempDir(), "shop.bak")
 	makeFixture(t, ctx, provider, fixture)
 
-	sbx, err := provider.Create(ctx, sandboxParams())
+	sbx, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create drill sandbox: %v", err)
 	}
@@ -142,7 +159,7 @@ func TestCorruptBakVerdict(t *testing.T) {
 	}
 
 	provider := docker.New(nil)
-	sbx, err := provider.Create(ctx, sandboxParams())
+	sbx, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -178,7 +195,7 @@ func buildAdapterOnPath(t *testing.T, ctx context.Context) {
 // BACKUP DATABASE artifact to the host.
 func makeFixture(t *testing.T, ctx context.Context, provider *docker.Provider, dest string) {
 	t.Helper()
-	seed, err := provider.Create(ctx, sandboxParams())
+	seed, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create seed sandbox: %v", err)
 	}

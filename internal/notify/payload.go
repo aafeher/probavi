@@ -2,6 +2,11 @@ package notify
 
 import "github.com/aafeher/probavi/internal/evidence"
 
+// SchemaID is the notification payload version this package emits. Like
+// the adapter protocol and the evidence schema, it is versioned
+// independently of the binary (docs/notifications.md §5).
+const SchemaID = "probavi-notification/1"
+
 // Payload is one notification message (docs/notifications.md §5,
 // probavi-notification/1). Struct order is the serialization order;
 // every field is always present, nullable values are null, never omitted.
@@ -51,7 +56,7 @@ func NewPayload(rec *evidence.Record) Payload {
 		}
 	}
 	p := Payload{
-		Schema:         "probavi-notification/1",
+		Schema:         SchemaID,
 		Event:          Event,
 		TS:             rec.TS,
 		Drill:          PayloadDrill{Name: rec.Drill.Name, ConfigHash: rec.Drill.ConfigHash},

@@ -86,7 +86,7 @@ func TestNewDefaults(t *testing.T) {
 
 func TestRunArgsDefaults(t *testing.T) {
 	p, _ := testProvider(t)
-	args, err := p.runArgs(map[string]string{"image": "postgres:16"})
+	args, err := p.runArgs(Descriptor, map[string]string{"image": "postgres:16"})
 	if err != nil {
 		t.Fatalf("runArgs: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestRunArgsDefaults(t *testing.T) {
 
 func TestRunArgsMapping(t *testing.T) {
 	p, _ := testProvider(t)
-	args, err := p.runArgs(map[string]string{
+	args, err := p.runArgs(Descriptor, map[string]string{
 		"image": "postgres:16", "memory": "2GiB", "cpus": "2",
 		"network": "bridge", "env.POSTGRES_PASSWORD": "secret",
 	})
@@ -128,7 +128,7 @@ func TestRunArgsMapping(t *testing.T) {
 
 func TestRunArgsCommandOverride(t *testing.T) {
 	p, _ := testProvider(t)
-	args, err := p.runArgs(map[string]string{"image": "x:1", "command": "sleep  infinity"})
+	args, err := p.runArgs(Descriptor, map[string]string{"image": "x:1", "command": "sleep  infinity"})
 	if err != nil {
 		t.Fatalf("runArgs: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestRunArgsCommandOverride(t *testing.T) {
 		t.Errorf("tail = %q, want the command argv split after the image", got)
 	}
 	// Without command the image stays last.
-	args, err = p.runArgs(map[string]string{"image": "x:1"})
+	args, err = p.runArgs(Descriptor, map[string]string{"image": "x:1"})
 	if err != nil || args[len(args)-1] != "x:1" {
 		t.Errorf("args tail = %v err=%v", args[len(args)-1], err)
 	}
@@ -151,7 +151,7 @@ func TestRunArgsRejects(t *testing.T) {
 		"empty env name": {"image": "x", "env.": "v"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := p.runArgs(params); !errors.Is(err, sandbox.ErrInvalidParams) {
+			if _, err := p.runArgs(Descriptor, params); !errors.Is(err, sandbox.ErrInvalidParams) {
 				t.Errorf("runArgs(%v): got %v, want ErrInvalidParams", params, err)
 			}
 		})
@@ -468,4 +468,59 @@ func TestRunnerErrorPaths(t *testing.T) {
 			t.Error("destroy runner error must surface")
 		}
 	})
+}
+
+// descriptor_test additions: the descriptor is the parameter gate, and it
+// is what docs/capabilities.json publishes. These two tests pin it in both
+// directions — everything declared works, and nothing works undeclared.
+
+// TestRunArgsAcceptsEveryDeclaredParam proves the published parameter list
+// is one a drill config can actually use.
+func TestRunArgsAcceptsEveryDeclaredParam(t *testing.T) {
+	params := map[string]string{
+		"image": "postgres:16", "network": "none", "memory": "512m",
+		"cpus": "1", "command": "sleep 1", "env.FOO": "bar",
+	}
+	for _, p := range Descriptor.Params {
+		if _, ok := params[p.Name]; !ok && !p.Family {
+			t.Fatalf("declared param %q has no sample value in this test", p.Name)
+		}
+	}
+	args, err := New(nil).runArgs(Descriptor, params)
+	if err != nil {
+		t.Fatalf("runArgs: %v", err)
+	}
+	for _, want := range [][]string{
+		{"--network", "none"}, {"--memory", "512m"}, {"--cpus", "1"},
+		{"-e", "FOO=bar"}, {"postgres:16"}, {"sleep", "1"},
+	} {
+		if !containsSequence(args, want) {
+			t.Errorf("argv %v does not apply %v", args, want)
+		}
+	}
+}
+
+// TestRunArgsRejectsUnhandledDeclaredParam covers the defect path: a
+// parameter the descriptor declares but runArgs never applies. Dropping it
+// silently would build a sandbox that is not the one the drill asked for.
+func TestRunArgsRejectsUnhandledDeclaredParam(t *testing.T) {
+	d := Descriptor
+	d.Params = append(append([]sandbox.Param{}, d.Params...),
+		sandbox.Param{Name: "readonly", Doc: "Declared but not implemented."})
+	_, err := New(nil).runArgs(d, map[string]string{"image": "postgres:16", "readonly": "true"})
+	if !errors.Is(err, sandbox.ErrInvalidParams) {
+		t.Fatalf("error %v is not ErrInvalidParams", err)
+	}
+	if !strings.Contains(err.Error(), "declared but not implemented") {
+		t.Errorf("error %q does not explain the defect", err)
+	}
+}
+
+func containsSequence(haystack, needle []string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if slices.Equal(haystack[i:i+len(needle)], needle) {
+			return true
+		}
+	}
+	return false
 }

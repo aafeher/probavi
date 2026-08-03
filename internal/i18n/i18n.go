@@ -18,6 +18,17 @@ import (
 //go:embed locales/*.json
 var locales embed.FS
 
+// SourceLocale is the canonical source language of the project. English
+// text is written inline as the catalog key, so English has no catalog
+// file and Locales() cannot report it (docs/i18n.md §6).
+const SourceLocale = "en"
+
+// TranslationScope states the translation boundary of docs/i18n.md §1 in
+// one sentence, for the generated capabilities manifest: a consumer that
+// advertises supported languages must not imply that machine contracts are
+// localized too.
+const TranslationScope = "CLI usage text and diagnostics only. Evidence records, machine-readable JSON outputs, structured logs, the adapter protocol, notification payloads, and configuration keys are never translated."
+
 // envChain is the docs/i18n.md §2 selection order: a Probavi-specific
 // override first, then the POSIX locale variables.
 var envChain = []string{"PROBAVI_LANG", "LC_ALL", "LC_MESSAGES", "LANG"}
@@ -125,6 +136,19 @@ func Catalog(tag string) (map[string]string, error) {
 		return nil, fmt.Errorf("read embedded catalog %s.json: %w", tag, err)
 	}
 	return parseCatalog(tag, raw)
+}
+
+// Available lists every locale this binary speaks, sorted: the embedded
+// catalogs plus the canonical source language, which needs no catalog.
+// It is what the generated capabilities manifest reports.
+func Available() ([]string, error) {
+	tags, err := Locales()
+	if err != nil {
+		return nil, err
+	}
+	tags = append(tags, SourceLocale)
+	sort.Strings(tags)
+	return tags, nil
 }
 
 // Locales lists the embedded catalog tags, sorted, so tests gate every

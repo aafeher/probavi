@@ -14,17 +14,33 @@ import (
 	"time"
 
 	"github.com/aafeher/probavi/internal/adapter"
+	"github.com/aafeher/probavi/internal/capabilities"
 	"github.com/aafeher/probavi/internal/sandbox"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
 )
 
-const mysqlImage = "mysql:8.4"
+// verifiedImage is the engine image adapter.json declares this adapter
+// verified against. The manifest and this suite read the same value, so
+// docs/capabilities.json can never claim an engine version CI does not
+// actually restore from (docs/capabilities.md §1).
+func verifiedImage(t *testing.T) string {
+	t.Helper()
+	m, err := capabilities.LoadAdapterManifest(".")
+	if err != nil {
+		t.Fatalf("load adapter manifest: %v", err)
+	}
+	image, err := m.VerifiedImage()
+	if err != nil {
+		t.Fatalf("adapter manifest: %v", err)
+	}
+	return image
+}
 
 // sandboxParams returns the documented drill-config sandbox params: an
 // empty root password is acceptable only because the sandbox has zero
 // ingress (--network none, no ports expressible).
-func sandboxParams() map[string]string {
-	return map[string]string{"image": mysqlImage, "env.MYSQL_ALLOW_EMPTY_PASSWORD": "yes"}
+func sandboxParams(t *testing.T) map[string]string {
+	return map[string]string{"image": verifiedImage(t), "env.MYSQL_ALLOW_EMPTY_PASSWORD": "yes"}
 }
 
 // TestEndToEndRestoreDrill proves the second engine through the unchanged
@@ -51,7 +67,7 @@ func TestEndToEndRestoreDrill(t *testing.T) {
 	makeFixture(t, ctx, provider, fixture)
 
 	// Phase B: the drill — fresh sandbox, restore through the protocol.
-	sbx, err := provider.Create(ctx, sandboxParams())
+	sbx, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create drill sandbox: %v", err)
 	}
@@ -143,7 +159,7 @@ func TestCorruptDumpVerdict(t *testing.T) {
 	}
 
 	provider := docker.New(nil)
-	sbx, err := provider.Create(ctx, sandboxParams())
+	sbx, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -300,7 +316,7 @@ mysqladmin --socket=/var/run/mysqld/mysqld.sock -u root shutdown`
 // mysqldump file to the host.
 func makeFixture(t *testing.T, ctx context.Context, provider *docker.Provider, dest string) {
 	t.Helper()
-	seed, err := provider.Create(ctx, sandboxParams())
+	seed, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create seed sandbox: %v", err)
 	}

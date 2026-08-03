@@ -14,11 +14,27 @@ import (
 	"time"
 
 	"github.com/aafeher/probavi/internal/adapter"
+	"github.com/aafeher/probavi/internal/capabilities"
 	"github.com/aafeher/probavi/internal/sandbox"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
 )
 
-const pgImage = "postgres:16"
+// verifiedImage is the engine image adapter.json declares this adapter
+// verified against. The manifest and this suite read the same value, so
+// docs/capabilities.json can never claim an engine version CI does not
+// actually restore from (docs/capabilities.md §1).
+func verifiedImage(t *testing.T) string {
+	t.Helper()
+	m, err := capabilities.LoadAdapterManifest(".")
+	if err != nil {
+		t.Fatalf("load adapter manifest: %v", err)
+	}
+	image, err := m.VerifiedImage()
+	if err != nil {
+		t.Fatalf("adapter manifest: %v", err)
+	}
+	return image
+}
 
 // TestEndToEndRestoreDrill is the first real vertical slice: the docker
 // provider, the core-side protocol client, and this adapter — as separate
@@ -36,7 +52,7 @@ func TestEndToEndRestoreDrill(t *testing.T) {
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	provider := docker.New(nil)
-	params := map[string]string{"image": pgImage, "env.POSTGRES_HOST_AUTH_METHOD": "trust"}
+	params := map[string]string{"image": verifiedImage(t), "env.POSTGRES_HOST_AUTH_METHOD": "trust"}
 
 	// Phase A: seed a database and take a real pg_dump fixture.
 	fixture := filepath.Join(t.TempDir(), "orders.dump")
@@ -130,7 +146,7 @@ func TestCorruptDumpVerdict(t *testing.T) {
 
 	provider := docker.New(nil)
 	sbx, err := provider.Create(ctx, map[string]string{
-		"image": pgImage, "env.POSTGRES_HOST_AUTH_METHOD": "trust",
+		"image": verifiedImage(t), "env.POSTGRES_HOST_AUTH_METHOD": "trust",
 	})
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
@@ -293,7 +309,7 @@ func buildPgBackRestImage(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	const tag = "probavi-it-pgbackrest:16"
 	dir := t.TempDir()
-	dockerfile := "FROM " + pgImage + "\n" +
+	dockerfile := "FROM " + verifiedImage(t) + "\n" +
 		"RUN apt-get update && apt-get install -y --no-install-recommends pgbackrest && rm -rf /var/lib/apt/lists/*\n"
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o600); err != nil {
 		t.Fatalf("write dockerfile: %v", err)

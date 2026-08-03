@@ -60,6 +60,39 @@ const (
 	maxAwaitUptime = 2 * time.Minute
 )
 
+// Descriptor is this provider's self-description: the parameter gate
+// runArgs resolves every configured key through, and the source the
+// generated capabilities manifest reads.
+var Descriptor = sandbox.Descriptor{
+	ID:     "docker",
+	Name:   "Docker",
+	Status: "experimental",
+	Params: []sandbox.Param{
+		{Name: "image", Required: true, Doc: "Sandbox image; it must contain the engine and the restore tooling the adapter drives."},
+		{Name: "network", Default: "none", Doc: "Docker network the sandbox joins."},
+		{Name: "memory", Doc: "Container memory limit (docker run --memory)."},
+		{Name: "cpus", Doc: "Container CPU limit (docker run --cpus)."},
+		{Name: "command", Doc: "Container command override, split on whitespace and executed without a shell — for engines the adapter starts itself."},
+		{Name: "env.", Family: true, Doc: "Environment variable set inside the sandbox."},
+	},
+	Isolation: sandbox.Isolation{
+		NetworkDefault: "none",
+		PublishedPorts: false,
+		Storage:        "container filesystem and anonymous volumes, removed with the container",
+		ForcedTeardown: true,
+		OrphanSweep:    "host- and pid-scoped labels, swept at drill start",
+	},
+	Constraints: []string{
+		"Requires a reachable Docker daemon; the docker CLI is driven directly, never the SDK.",
+		"Remote daemons work unchanged through the CLI's native SSH transport (DOCKER_HOST=ssh://user@host). The endpoint stays in the environment: sandbox params are recorded verbatim in signed evidence, and connection details must never appear there.",
+		"Publishing ports is not expressible: the provider never emits -p.",
+	},
+	VerifiedAgainst: []string{
+		"local Docker daemon (CI integration suite)",
+		"remote daemon over the docker CLI SSH transport (CI integration suite)",
+	},
+}
+
 // Provider creates and destroys Docker-backed sandboxes.
 type Provider struct {
 	bin    string
@@ -99,7 +132,7 @@ type Sandbox struct {
 // adapter's job, not the provider's. The context must carry the drill's
 // deadline; a hard internal cap bounds the wait regardless.
 func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandbox, error) {
-	args, err := p.runArgs(params)
+	args, err := p.runArgs(Descriptor, params)
 	if err != nil {
 		return nil, err
 	}
@@ -308,12 +341,13 @@ func (p *Provider) remove(ctx context.Context, id string) error {
 }
 
 // runArgs builds the docker run arguments from drill-config sandbox params.
-// Recognized: image (required), network (default "none"), memory, cpus,
-// command (whitespace-split argv appended after the image — for engines
-// restored physically, where the adapter must start the server itself),
-// env.<NAME>. Anything else is an error — typos must not silently weaken a
-// sandbox. Publishing ports is not expressible at all.
-func (p *Provider) runArgs(params map[string]string) ([]string, error) {
+// The accepted parameters are exactly what the descriptor declares —
+// anything else is an error, because a typo must not silently weaken a
+// sandbox — and a declared parameter this function does not implement is
+// an error too, because a dropped parameter is a sandbox that is not what
+// the drill asked for. Publishing ports is not expressible at all.
+// The descriptor is a parameter so tests can drive both failure paths.
+func (p *Provider) runArgs(d sandbox.Descriptor, params map[string]string) ([]string, error) {
 	image := params["image"]
 	if image == "" {
 		return nil, fmt.Errorf(`%w: "image" is required for the docker provider`, sandbox.ErrInvalidParams)
@@ -332,20 +366,25 @@ func (p *Provider) runArgs(params map[string]string) ([]string, error) {
 	}
 	for _, k := range sortedKeys(params) {
 		v := params[k]
-		switch {
-		case k == "image" || k == "network" || k == "command":
-		case k == "memory":
+		spec, ok := d.Lookup(k)
+		if !ok {
+			return nil, d.UnknownParamError(k)
+		}
+		switch spec.Name {
+		case "image", "network", "command":
+			// Consumed above, or appended after the image below.
+		case "memory":
 			args = append(args, "--memory", v)
-		case k == "cpus":
+		case "cpus":
 			args = append(args, "--cpus", v)
-		case strings.HasPrefix(k, "env."):
+		case "env.":
 			name := strings.TrimPrefix(k, "env.")
 			if !envNamePattern.MatchString(name) {
 				return nil, fmt.Errorf("%w: %q is not a valid environment variable name", sandbox.ErrInvalidParams, name)
 			}
 			args = append(args, "-e", name+"="+v)
 		default:
-			return nil, fmt.Errorf("%w: unknown docker sandbox param %q (supported: image, network, memory, cpus, command, env.<NAME>)", sandbox.ErrInvalidParams, k)
+			return nil, d.UnhandledParamError(k)
 		}
 	}
 	args = append(args, image)

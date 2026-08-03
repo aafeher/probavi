@@ -19,8 +19,8 @@ const (
 
 	// schemaFileCount guards against a schema file silently dropping out of
 	// the walk (12 adapter shapes + the evidence record + the notification
-	// payload).
-	schemaFileCount = 14
+	// payload + the capabilities manifest).
+	schemaFileCount = 15
 )
 
 // newCompiler registers every schema file under its canonical $id so that

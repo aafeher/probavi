@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"slices"
 )
 
 const (
@@ -56,8 +57,16 @@ func lineHash(line []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// SchemaIDs returns every published schema version this package verifies,
+// oldest first. Verification and the generated capabilities manifest read
+// the same list, so what the binary accepts and what the manifest claims
+// cannot drift apart.
+func SchemaIDs() []string {
+	return []string{SchemaIDv0, SchemaID}
+}
+
 // supportedSchema reports whether a stored record's declared schema version
 // is one this verifier implements (evidence-schema.md §10).
 func supportedSchema(s string) bool {
-	return s == SchemaID || s == SchemaIDv0
+	return slices.Contains(SchemaIDs(), s)
 }

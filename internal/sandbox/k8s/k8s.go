@@ -66,6 +66,38 @@ const (
 	ttlSecondsAfterFinished = 600
 )
 
+// Descriptor is this provider's self-description: the parameter gate
+// manifest resolves every configured key through, and the source the
+// generated capabilities manifest reads.
+var Descriptor = sandbox.Descriptor{
+	ID:     "k8s",
+	Name:   "Kubernetes Job",
+	Status: "experimental",
+	Params: []sandbox.Param{
+		{Name: "image", Required: true, Doc: "Sandbox image; it must contain the engine and the restore tooling the adapter drives."},
+		{Name: "namespace", Default: "default", Doc: "Namespace the Job is created in."},
+		{Name: "memory", Doc: "Container memory request and limit, set equal so the pod is guaranteed."},
+		{Name: "cpus", Doc: "Container CPU request and limit, set equal so the pod is guaranteed."},
+		{Name: "command", Doc: "Container command override, split on whitespace — for engines the adapter starts itself."},
+		{Name: "env.", Family: true, Doc: "Environment variable set inside the sandbox."},
+	},
+	Isolation: sandbox.Isolation{
+		PublishedPorts: false,
+		Storage:        "pod filesystem, deleted with the Job",
+		ForcedTeardown: true,
+		OrphanSweep:    "host- and pid-scoped labels, swept at drill start",
+		ExternalBackstop: fmt.Sprintf(
+			"cluster-side: activeDeadlineSeconds %d then TTL %ds, so a sandbox dies even if the drill host does",
+			activeDeadlineSeconds, ttlSecondsAfterFinished),
+	},
+	Constraints: []string{
+		"Requires a working kubectl context with rights to create, exec into, and delete Jobs in the target namespace; the kubectl CLI is driven directly, never client-go.",
+		"Network isolation is the cluster's job: the pod carries the sandbox label so a NetworkPolicy can select it. There is no pod-level equivalent of the docker provider's --network none.",
+		"The pod runs with no service-account token, no service links, and the RuntimeDefault seccomp profile.",
+	},
+	VerifiedAgainst: []string{"kind cluster (CI integration suite)"},
+}
+
 // Provider creates and destroys Kubernetes-backed sandboxes.
 type Provider struct {
 	bin    string
@@ -105,7 +137,7 @@ type Sandbox struct {
 // Create submits a Job built from drill-config sandbox params and waits
 // until its pod runs. Engine readiness inside the pod is the adapter's job.
 func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandbox, error) {
-	m, namespace, err := p.manifest(params)
+	m, namespace, err := p.manifest(Descriptor, params)
 	if err != nil {
 		return nil, err
 	}
@@ -294,13 +326,12 @@ func (p *Provider) remove(ctx context.Context, namespace, job string) error {
 	return nil
 }
 
-// manifest builds the Job object from drill-config sandbox params.
-// Recognized: image (required), namespace (default "default"), memory,
-// cpus (both become requests and limits), command (whitespace-split
-// container command override — for engines restored physically, where the
-// adapter must start the server itself), env.<NAME>. Anything else is an
-// error — typos must not silently weaken a sandbox.
-func (p *Provider) manifest(params map[string]string) (*jobManifest, string, error) {
+// manifest builds the Job object from drill-config sandbox params. The
+// accepted parameters are exactly what the descriptor declares — anything
+// else is an error, because a typo must not silently weaken a sandbox —
+// and a declared parameter this function does not implement is an error
+// too. The descriptor is a parameter so tests can drive both failure paths.
+func (p *Provider) manifest(d sandbox.Descriptor, params map[string]string) (*jobManifest, string, error) {
 	image := params["image"]
 	if image == "" {
 		return nil, "", fmt.Errorf(`%w: "image" is required for the k8s provider`, sandbox.ErrInvalidParams)
@@ -313,20 +344,25 @@ func (p *Provider) manifest(params map[string]string) (*jobManifest, string, err
 	var env []envVar
 	for _, k := range sortedKeys(params) {
 		v := params[k]
-		switch {
-		case k == "image" || k == "namespace" || k == "command":
-		case k == "memory":
+		spec, ok := d.Lookup(k)
+		if !ok {
+			return nil, "", d.UnknownParamError(k)
+		}
+		switch spec.Name {
+		case "image", "namespace", "command":
+			// Consumed above, or set on the container below.
+		case "memory":
 			limits["memory"] = v
-		case k == "cpus":
+		case "cpus":
 			limits["cpu"] = v
-		case strings.HasPrefix(k, "env."):
+		case "env.":
 			name := strings.TrimPrefix(k, "env.")
 			if !envNamePattern.MatchString(name) {
 				return nil, "", fmt.Errorf("%w: %q is not a valid environment variable name", sandbox.ErrInvalidParams, name)
 			}
 			env = append(env, envVar{Name: name, Value: v})
 		default:
-			return nil, "", fmt.Errorf("%w: unknown k8s sandbox param %q (supported: image, namespace, memory, cpus, command, env.<NAME>)", sandbox.ErrInvalidParams, k)
+			return nil, "", d.UnhandledParamError(k)
 		}
 	}
 	var resources *resourceSpec

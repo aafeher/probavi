@@ -1,0 +1,16 @@
+{
+  "_comment": "Facts about this adapter that its probe response cannot carry: display names, maturity, and the engine versions CI actually restores from. Everything the probe declares (adapter version, engine id, source kinds, pitr) is read from testdata/probe_response.golden instead — never duplicated here. The capabilities generator fails if the source names below do not match the probe exactly, and the integration suite restores from the image listed under verified, so neither can drift. See docs/capabilities.md.",
+  "id": "mongodb",
+  "name": "MongoDB",
+  "status": "experimental",
+  "engine_name": "MongoDB",
+  "conformance_verified": true,
+  "docs": "adapters/mongodb/README.md",
+  "verified": [
+    { "engine_version": "7", "image": "mongo:7" }
+  ],
+  "sources": {
+    "mongodump": "One mongodump archive, plain or gzip",
+    "mongodump_dir": "A directory of mongodump archives; the newest is restored"
+  }
+}

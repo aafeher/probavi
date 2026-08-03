@@ -11,7 +11,50 @@ always called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- `probavi adapter conformance` usage text now documents exit code `2`.
+  The command has always returned it when the suite cannot be driven to
+  completion — an adapter that fails to exec, a stdout that cannot be
+  written — but the help text listed only `0`, `1`, and `3`, so a CI
+  pipeline branching on the documented set would have treated a suite
+  that never ran as an unrecognized status. Surfaced while building the
+  CLI contract table for `docs/capabilities.json`, which reads the exit
+  codes from the same table the binary dispatches from. All 23 locale
+  catalogs are updated with it; **the added clause needs a native-speaker
+  review pass before release** (docs/i18n.md §5).
+
 ### Added
+
+- Generated capabilities manifest: `docs/capabilities.json`
+  (`probavi-capabilities/1`), the machine-readable statement of what
+  Probavi can do in this repository — adapters with the engine versions
+  CI actually restores from, sandbox providers with their parameters and
+  isolation properties, built-in checks, the CLI commands with their
+  exit-code contract, notification transports, available locales, the
+  three contract versions, and the non-goals a consumer must never
+  contradict. Its consumer contract is `docs/capabilities.md`
+  (normative), its schema `docs/schemas/capabilities/capabilities.json`,
+  and it is versioned independently of the binary like the adapter
+  protocol and the evidence schema.
+
+  It exists because downstream surfaces — the website reads this
+  repository as a submodule — had no machine-readable source for
+  capability claims and were writing them from README prose, which is
+  exactly how a trust product ends up overstating what it does. Every
+  fact is read from the code that implements it: the adapters' own probe
+  goldens, the sandbox provider descriptors, the check registry, the CLI
+  command table, the notification constants, the embedded locale
+  catalogs, and the frozen contract version constants. The generator
+  refuses to publish a claim the repository does not back — an adapter
+  whose probe declares a source kind its manifest does not name, an
+  engine version that does not appear in the image the integration suite
+  pulls, a document path that no longer exists, an unknown maturity
+  value — and a fifth CI gate ("Capabilities manifest") regenerates the
+  file and fails on any diff. Output is deterministic and carries no
+  timestamp or build metadata, so a diff always means a capability
+  changed. `probavi` gains no new subcommand: the manifest describes the
+  repository, not the binary.
 
 - Independent evidence verifier (`spec/evidence`, evidence schema §12).
   Verifying a Probavi evidence log no longer depends on Probavi: a

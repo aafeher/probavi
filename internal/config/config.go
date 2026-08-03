@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -132,6 +133,18 @@ type NotifyWebhook struct {
 // (docs/notifications.md §2); they mirror the evidence outcome values.
 var notifyOutcomes = map[string]bool{
 	"pass": true, "fail": true, "error": true, "cancelled": true,
+}
+
+// NotifyOutcomes returns the outcome names a webhook's on filter accepts,
+// sorted. It is derived from the validation table above, so the generated
+// capabilities manifest cannot disagree with what a config may contain.
+func NotifyOutcomes() []string {
+	out := make([]string, 0, len(notifyOutcomes))
+	for o := range notifyOutcomes {
+		out = append(out, o)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Load reads, parses, and validates a drill configuration. The returned
@@ -337,17 +350,26 @@ func (ch *Check) validateBuiltin(p *problems, at string) {
 	if ch.Name != "" {
 		p.add(msgCheckNameOnlySQL, at)
 	}
-	switch ch.Builtin {
-	case "service_healthy":
+	// The registry (builtins.go) is the vocabulary gate: a kind absent
+	// from it is rejected here and therefore never reaches internal/checks.
+	kind, ok := LookupCheckKind(ch.Builtin)
+	if !ok || !kind.Builtin {
+		p.add(msgCheckUnknownBuiltin, at, ch.Builtin)
+		return
+	}
+	switch kind.ID {
+	case CheckServiceHealthy:
 		ch.forbid(p, at, fields{table: true, column: true, minmax: true, maxAge: true})
-	case "table_exists":
+	case CheckTableExists:
 		ch.requireTable(p, at)
 		ch.forbid(p, at, fields{column: true, minmax: true, maxAge: true})
-	case "row_count":
+	case CheckRowCount:
 		ch.validateRowCount(p, at)
-	case "freshness":
+	case CheckFreshness:
 		ch.validateFreshness(p, at)
 	default:
+		// A registered built-in with no rules here is a defect in this
+		// package, not a user error; TestEveryBuiltinIsValidated pins it.
 		p.add(msgCheckUnknownBuiltin, at, ch.Builtin)
 	}
 }
