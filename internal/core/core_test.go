@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/adapter"
-	"github.com/aafeher/probavi/internal/config"
-	"github.com/aafeher/probavi/internal/evidence"
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/adapter"
+	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // --- fakes -----------------------------------------------------------------

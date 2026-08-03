@@ -68,7 +68,7 @@ const (
 	// ProjectLicense is the SPDX identifier of LICENSE.
 	ProjectLicense = "Apache-2.0"
 	// ProjectRepository is the canonical source location.
-	ProjectRepository = "https://github.com/aafeher/probavi"
+	ProjectRepository = "https://github.com/probavi/probavi"
 	// CLIBinary is the name of the shipped binary.
 	CLIBinary = "probavi"
 )

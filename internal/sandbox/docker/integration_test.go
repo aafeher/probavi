@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // testImage must stay running with its default entrypoint (like a real

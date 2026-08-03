@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/adapter"
-	"github.com/aafeher/probavi/internal/evidence"
-	"github.com/aafeher/probavi/internal/i18n"
-	"github.com/aafeher/probavi/internal/sandbox/remotehost"
+	"github.com/probavi/probavi/internal/adapter"
+	"github.com/probavi/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/i18n"
+	"github.com/probavi/probavi/internal/sandbox/remotehost"
 )
 
 // TestVersionCommand pins the version output: the binary version plus both

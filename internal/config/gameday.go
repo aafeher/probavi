@@ -12,7 +12,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"github.com/aafeher/probavi/internal/i18n"
+	"github.com/probavi/probavi/internal/i18n"
 )
 
 // GameDay is a multi-database restore exercise: member drills executed in

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // deadPID is close to the default pid_max; no live process realistically

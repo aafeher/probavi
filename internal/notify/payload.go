@@ -1,6 +1,6 @@
 package notify
 
-import "github.com/aafeher/probavi/internal/evidence"
+import "github.com/probavi/probavi/internal/evidence"
 
 // SchemaID is the notification payload version this package emits. Like
 // the adapter protocol and the evidence schema, it is versioned

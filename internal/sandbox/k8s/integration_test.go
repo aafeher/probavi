@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/adapter"
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/adapter"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // itImage is used for every integration sandbox: with the default

@@ -1,4 +1,4 @@
-module github.com/aafeher/probavi
+module github.com/probavi/probavi
 
 go 1.24
 

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // prelude reads the request and extracts the request_id — the shared

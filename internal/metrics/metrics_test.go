@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/evidence"
 )
 
 func i64(n int64) *int64   { return &n }

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/i18n"
+	"github.com/probavi/probavi/internal/i18n"
 )
 
 // builtins_test.go pins the check registry from both sides. The registry

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/config"
+	"github.com/probavi/probavi/internal/config"
 )
 
 func discardLogger() *slog.Logger {

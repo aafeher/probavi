@@ -17,7 +17,7 @@ specification says it means.
 So this module is deliberately kept at arm's length from the product:
 
 - **It shares no code with the Probavi core.** It is a separate Go module, so
-  the language itself refuses any import of `github.com/aafeher/probavi/internal/...`.
+  the language itself refuses any import of `github.com/probavi/probavi/internal/...`.
   The independence is enforced by the toolchain, not by discipline.
 - **It was written from the specification document alone**, not by reading
   the core's implementation.
@@ -39,7 +39,7 @@ go run ./cmd/probavi-evidence-verify \
 Or install it as a standalone tool — no Probavi installation required:
 
 ```sh
-go install github.com/aafeher/probavi/spec/evidence/cmd/probavi-evidence-verify@latest
+go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@latest
 ```
 
 `--key` is repeatable; pass every public key a log may have been signed

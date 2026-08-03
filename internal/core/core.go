@@ -18,10 +18,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/aafeher/probavi/internal/adapter"
-	"github.com/aafeher/probavi/internal/checks"
-	"github.com/aafeher/probavi/internal/config"
-	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/adapter"
+	"github.com/probavi/probavi/internal/checks"
+	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/evidence"
 )
 
 // teardownGrace bounds cleanup work that runs after the drill context is

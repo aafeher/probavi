@@ -20,7 +20,7 @@ The output is not a green checkmark. It is an auditable, cryptographically verif
 
 ## Status
 
-**Pre-alpha, working end to end for PostgreSQL, MySQL, MongoDB, and SQL Server.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`, `mongodump` archives), native SQL Server `.bak` files, and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative and frozen, with machine-readable JSON Schemas in [docs/schemas/](docs/schemas/); third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. What exactly ships, in machine-readable form, is [docs/capabilities.json](docs/capabilities.json): generated from the code that implements each capability, regenerated and diff-checked by CI, and the source anything republishing Probavi's capabilities should read instead of this paragraph ([contract](docs/capabilities.md)). Released as **v0.1.0**: reproducible binaries for Linux and macOS (amd64/arm64) with checksums on the [releases page](https://github.com/aafeher/probavi/releases) — pre-1.0, minor versions may break, every change is in [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
+**Pre-alpha, working end to end for PostgreSQL, MySQL, MongoDB, and SQL Server.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`, `mongodump` archives), native SQL Server `.bak` files, and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative and frozen, with machine-readable JSON Schemas in [docs/schemas/](docs/schemas/); third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. What exactly ships, in machine-readable form, is [docs/capabilities.json](docs/capabilities.json): generated from the code that implements each capability, regenerated and diff-checked by CI, and the source anything republishing Probavi's capabilities should read instead of this paragraph ([contract](docs/capabilities.md)). Released as **v0.1.0**: reproducible binaries for Linux and macOS (amd64/arm64) with checksums on the [releases page](https://github.com/probavi/probavi/releases) — pre-1.0, minor versions may break, every change is in [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
 
 ## Shape
 
@@ -66,7 +66,7 @@ Exit codes are the cron/CI contract: `0` backup proven restorable, `1` recoverab
 Prove a PostgreSQL backup restorable in about five minutes. You need Go 1.24+, Docker, and a `pg_dump` custom-format (`-Fc`) backup file.
 
 ```console
-$ git clone https://github.com/aafeher/probavi.git && cd probavi
+$ git clone https://github.com/probavi/probavi.git && cd probavi
 $ go build -o bin/probavi ./cmd/probavi
 $ go build -o bin/probavi-adapter-postgres ./adapters/postgres
 $ export PATH="$PWD/bin:$PATH"
@@ -109,7 +109,7 @@ That `VALID` is the product: anyone holding only the log file and your public ke
 They do not have to take Probavi's word for it either. [`spec/evidence`](spec/evidence) is a second, independent verifier — written from [the format specification](docs/evidence-schema.md) alone, no dependencies, and in a separate Go module so it *cannot* import Probavi's own evidence code. Install it without installing Probavi:
 
 ```console
-$ go install github.com/aafeher/probavi/spec/evidence/cmd/probavi-evidence-verify@latest
+$ go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@latest
 $ probavi-evidence-verify --log evidence.jsonl --key probavi.key.pub
 {"status":"VALID","records":1,"damaged_lines":[]}
 ```

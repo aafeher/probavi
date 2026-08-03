@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/cli"
-	"github.com/aafeher/probavi/internal/i18n"
-	"github.com/aafeher/probavi/internal/sandbox/registry"
+	"github.com/probavi/probavi/internal/cli"
+	"github.com/probavi/probavi/internal/i18n"
+	"github.com/probavi/probavi/internal/sandbox/registry"
 )
 
 // cli_test.go pins the wiring between the CLI contract (internal/cli) and

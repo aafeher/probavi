@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 type response struct {

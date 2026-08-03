@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // queryResult is one sql_runner execution: succeeded reflects the runner's
