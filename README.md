@@ -114,6 +114,12 @@ $ probavi-evidence-verify --log evidence.jsonl --key probavi.key.pub
 {"status":"VALID","records":1,"damaged_lines":[]}
 ```
 
+The verifier is versioned independently of the `probavi` binary, with its own `spec/evidence/vX.Y.Z` tags. Pin one when the verification itself has to be reproducible — an audit that records which verifier accepted a log has to be able to name it, and `@latest` moves:
+
+```console
+$ go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@v0.2.0
+```
+
 Verification is free permanently and is never part of a commercial offering — paywalling it would destroy the thing the evidence is for.
 
 > **Installing v0.1.0 as a Go module.** The repository moved to the `probavi` organisation on 2026-08-03 and the module path moved with it. `v0.1.0` predates that and declares the old path in its `go.mod`, so it resolves only as `github.com/aafeher/probavi@v0.1.0`; `github.com/probavi/probavi@v0.1.0` fails with a module-path mismatch and cannot be repaired, because the module proxy and the checksum database have already recorded that version and are immutable by design. Use `v0.2.0` or later under the new path. Downloading the v0.1.0 release binaries is unaffected.
