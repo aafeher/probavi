@@ -8,25 +8,46 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/aafeher/probavi/internal/capabilities"
 )
 
 // TestInRepoAdaptersAreConformant is the Phase 2 exit criterion's other
-// half: both shipped adapters pass the frozen §10 list. No container
+// half: the shipped adapters pass the frozen §10 list. No container
 // runtime is involved — conformance runs against the simulated sandbox.
+//
+// The list of adapters comes from the manifests that also feed
+// docs/capabilities.json: every adapter whose adapter.json declares
+// conformance_verified is driven here, so that published claim is one CI
+// enforces rather than one a maintainer remembered to keep true.
 func TestInRepoAdaptersAreConformant(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	for _, name := range []string{"postgres", "mysql"} {
-		t.Run(name, func(t *testing.T) {
-			bin := filepath.Join(t.TempDir(), "probavi-adapter-"+name)
-			if out, err := exec.CommandContext(ctx, "go", "build", "-o", bin,
-				"../../adapters/"+name).CombinedOutput(); err != nil {
-				t.Fatalf("build adapter: %v: %s", err, out)
+	dirs, err := capabilities.AdapterDirs("../..")
+	if err != nil {
+		t.Fatalf("list adapters: %v", err)
+	}
+	tested := 0
+	for _, dir := range dirs {
+		m, merr := capabilities.LoadAdapterManifest(dir)
+		if merr != nil {
+			t.Fatalf("load manifest %s: %v", dir, merr)
+		}
+		if !m.ConformanceVerified {
+			t.Logf("%s does not declare conformance_verified — skipped", m.ID)
+			continue
+		}
+		tested++
+		t.Run(m.ID, func(t *testing.T) {
+			bin := filepath.Join(t.TempDir(), "probavi-adapter-"+m.ID)
+			if out, berr := exec.CommandContext(ctx, "go", "build", "-o", bin,
+				dir).CombinedOutput(); berr != nil {
+				t.Fatalf("build adapter: %v: %s", berr, out)
 			}
-			report, err := Run(ctx, bin, Options{})
-			if err != nil {
-				t.Fatalf("Run: %v", err)
+			report, rerr := Run(ctx, bin, Options{})
+			if rerr != nil {
+				t.Fatalf("Run: %v", rerr)
 			}
 			for _, c := range report.Checks {
 				if !c.OK {
@@ -37,5 +58,8 @@ func TestInRepoAdaptersAreConformant(t *testing.T) {
 				t.Fatalf("report: %d passed / %d failed", report.Passed, report.Failed)
 			}
 		})
+	}
+	if tested == 0 {
+		t.Fatal("no adapter declares conformance_verified — the suite would pass vacuously")
 	}
 }

@@ -151,7 +151,7 @@ func TestNewRejects(t *testing.T) {
 
 func TestParseParams(t *testing.T) {
 	t.Run("mapping", func(t *testing.T) {
-		set, err := parseParams(map[string]string{"memory": "2G", "cpus": "0.5", "workspace_root": "/srv/d"})
+		set, err := parseParams(Descriptor, map[string]string{"memory": "2G", "cpus": "0.5", "workspace_root": "/srv/d"})
 		if err != nil {
 			t.Fatalf("parseParams: %v", err)
 		}
@@ -165,9 +165,9 @@ func TestParseParams(t *testing.T) {
 	})
 
 	t.Run("defaults", func(t *testing.T) {
-		set, err := parseParams(nil)
+		set, err := parseParams(Descriptor, nil)
 		if err != nil || set.root != defaultWorkspaceRoot || len(set.props) != 0 {
-			t.Errorf("parseParams(nil) = %+v, %v — want the default root and no caps", set, err)
+			t.Errorf("parseParams(Descriptor, nil) = %+v, %v — want the default root and no caps", set, err)
 		}
 	})
 
@@ -183,8 +183,8 @@ func TestParseParams(t *testing.T) {
 			"word cpus":       {"cpus": "two"},
 		} {
 			t.Run(name, func(t *testing.T) {
-				if _, err := parseParams(params); !errors.Is(err, sandbox.ErrInvalidParams) {
-					t.Errorf("parseParams(%v): got %v, want ErrInvalidParams", params, err)
+				if _, err := parseParams(Descriptor, params); !errors.Is(err, sandbox.ErrInvalidParams) {
+					t.Errorf("parseParams(Descriptor, %v): got %v, want ErrInvalidParams", params, err)
 				}
 			})
 		}
@@ -588,4 +588,42 @@ func TestSweepOrphansErrorPaths(t *testing.T) {
 			t.Errorf("removal failure: got %v", err)
 		}
 	})
+}
+
+// TestParseParamsAcceptsEveryDeclaredParam proves the published parameter
+// list is one a drill config can actually use.
+func TestParseParamsAcceptsEveryDeclaredParam(t *testing.T) {
+	params := map[string]string{
+		"workspace_root": "/srv/probavi", "memory": "512M", "cpus": "1",
+	}
+	for _, p := range Descriptor.Params {
+		if _, ok := params[p.Name]; !ok {
+			t.Fatalf("declared param %q has no sample value in this test", p.Name)
+		}
+	}
+	set, err := parseParams(Descriptor, params)
+	if err != nil {
+		t.Fatalf("parseParams: %v", err)
+	}
+	if set.root != "/srv/probavi" {
+		t.Errorf("workspace root %q", set.root)
+	}
+	if !slices.Contains(set.props, "MemoryMax=512M") || !slices.Contains(set.props, "CPUQuota=100%") {
+		t.Errorf("slice properties %v", set.props)
+	}
+}
+
+// TestParseParamsRejectsUnhandledDeclaredParam covers the defect path: a
+// declared parameter parseParams never applies.
+func TestParseParamsRejectsUnhandledDeclaredParam(t *testing.T) {
+	d := Descriptor
+	d.Params = append(append([]sandbox.Param{}, d.Params...),
+		sandbox.Param{Name: "readonly", Doc: "Declared but not implemented."})
+	_, err := parseParams(d, map[string]string{"readonly": "true"})
+	if !errors.Is(err, sandbox.ErrInvalidParams) {
+		t.Fatalf("error %v is not ErrInvalidParams", err)
+	}
+	if !strings.Contains(err.Error(), "declared but not implemented") {
+		t.Errorf("error %q does not explain the defect", err)
+	}
 }

@@ -115,6 +115,39 @@ const (
 
 var memoryPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGTPE]?$`)
 
+// Descriptor is this provider's self-description: the parameter gate
+// parseParams resolves every configured key through, and the source the
+// generated capabilities manifest reads. There is no image param; its
+// absence is what this provider is.
+var Descriptor = sandbox.Descriptor{
+	ID:     "remotehost",
+	Name:   "Bare host over SSH",
+	Status: "experimental",
+	Params: []sandbox.Param{
+		{Name: "workspace_root", Default: defaultWorkspaceRoot, Doc: "Absolute path on the target holding per-drill workspaces."},
+		{Name: "memory", Doc: "MemoryMax of the drill's transient systemd slice (systemd size suffixes)."},
+		{Name: "cpus", Doc: "CPUQuota of the drill's transient systemd slice (decimal CPU count)."},
+	},
+	Isolation: sandbox.Isolation{
+		PublishedPorts: false,
+		Storage:        "per-drill workspace under the workspace root, mode 0700, deleted (not shredded) at teardown",
+		ForcedTeardown: true,
+		OrphanSweep:    "host-scoped owner markers under the workspace root, swept at drill start",
+		ExternalBackstop: fmt.Sprintf(
+			"target-side transient systemd timer stops the slice and removes the workspace %ds after creation, so restored data does not outlive a vanished drill host",
+			hardDeadlineSeconds),
+	},
+	Constraints: []string{
+		"No container isolation. A dedicated drill host is a premise of this provider, not a recommendation.",
+		fmt.Sprintf("systemd %d or newer on the target, probed at first contact.", minSystemdVersion),
+		"Engine and tool versions are whatever the target host has installed; the version match a sandbox image guarantees does not apply here.",
+		"Requires the right to run transient systemd units as the drill user — the polkit rule the README ships.",
+		"The target is named by the " + EnvTarget + " environment variable only, never in drill config: sandbox params are recorded verbatim in signed evidence, and connection details must never appear there.",
+	},
+	VerifiedAgainst: []string{"systemd host over the OpenSSH CLI (CI integration suite)"},
+	Docs:            "docs/sandbox-bare-host.md",
+}
+
 // Provider creates and destroys bare-host sandboxes on one ssh target.
 type Provider struct {
 	bin    string
@@ -142,7 +175,7 @@ func New(logger *slog.Logger, params map[string]string) (*Provider, error) {
 	if strings.HasPrefix(target, "-") {
 		return nil, fmt.Errorf("remotehost provider: %s %q must not begin with %q — it would be read as an ssh option", EnvTarget, target, "-")
 	}
-	set, err := parseParams(params)
+	set, err := parseParams(Descriptor, params)
 	if err != nil {
 		return nil, err
 	}
@@ -171,16 +204,20 @@ type settings struct {
 	props []string // systemctl set-property arguments for the slice
 }
 
-// parseParams validates drill-config sandbox params. Recognized:
-// workspace_root (absolute path, default /var/lib/probavi-drills), memory
-// (slice MemoryMax, systemd size suffixes), cpus (slice CPUQuota, decimal
-// count). Anything else is an error — typos must not silently weaken a
-// sandbox. There is no image param; its absence is what this provider is.
-func parseParams(params map[string]string) (*settings, error) {
+// parseParams validates drill-config sandbox params. The accepted keys are
+// exactly what the descriptor declares — anything else is an error, because
+// a typo must not silently weaken a sandbox — and a declared key this
+// function does not implement is an error too. The descriptor is a
+// parameter so tests can drive both failure paths.
+func parseParams(d sandbox.Descriptor, params map[string]string) (*settings, error) {
 	set := &settings{root: defaultWorkspaceRoot}
 	for _, k := range sortedKeys(params) {
 		v := params[k]
-		switch k {
+		spec, ok := d.Lookup(k)
+		if !ok {
+			return nil, d.UnknownParamError(k)
+		}
+		switch spec.Name {
 		case "workspace_root":
 			if !strings.HasPrefix(v, "/") {
 				return nil, fmt.Errorf("%w: workspace_root %q must be an absolute path", sandbox.ErrInvalidParams, v)
@@ -198,7 +235,7 @@ func parseParams(params map[string]string) (*settings, error) {
 			}
 			set.props = append(set.props, fmt.Sprintf("CPUQuota=%d%%", int(math.Round(f*100))))
 		default:
-			return nil, fmt.Errorf("%w: unknown remotehost sandbox param %q (supported: workspace_root, memory, cpus)", sandbox.ErrInvalidParams, k)
+			return nil, d.UnhandledParamError(k)
 		}
 	}
 	return set, nil
@@ -210,7 +247,7 @@ func parseParams(params map[string]string) (*settings, error) {
 // the deadline backstop. There is no container entrypoint: the adapter
 // starts and owns the engine through exec verbs (the idle pattern).
 func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandbox, error) {
-	set, err := parseParams(params)
+	set, err := parseParams(Descriptor, params)
 	if err != nil {
 		return nil, err
 	}

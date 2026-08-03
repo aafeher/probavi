@@ -378,3 +378,51 @@ func TestDetailTruncation(t *testing.T) {
 		t.Errorf("detail length = %d (%q...), want truncated to %d", len(res.Detail), res.Detail[:40], maxDetailLen)
 	}
 }
+
+// TestEveryRegisteredKindIsRunnable is the runner half of the check
+// registry gate. config.CheckKinds is what docs/capabilities.json
+// publishes and what config validation admits; this proves the runner
+// dispatches every one of them, so a published check can never be one that
+// reaches "unrunnable check configuration" at drill time.
+func TestEveryRegisteredKindIsRunnable(t *testing.T) {
+	for _, k := range config.CheckKinds() {
+		t.Run(k.ID, func(t *testing.T) {
+			exec := &fakeExec{t: t, respond: value("1")}
+			c := config.Check{}
+			if k.Builtin {
+				c.Builtin = k.ID
+			}
+			for _, p := range k.Params {
+				switch p.Name {
+				case "table":
+					c.Table = "orders"
+				case "column":
+					c.Column = "created_at"
+				case "max_age":
+					c.MaxAge = config.Duration(24 * time.Hour)
+				case "sql":
+					c.SQL = "SELECT 1"
+				}
+			}
+			if k.ID == config.CheckRowCount {
+				// The registry's Requires rule: at least one bound.
+				bound := int64(0)
+				c.Min = &bound
+			}
+			if _, err := Run(context.Background(), []config.Check{c}, testDeps(exec)); err != nil {
+				t.Fatalf("registered kind %q is not runnable: %v", k.ID, err)
+			}
+		})
+	}
+}
+
+// TestUnrunnableConfigurationIsAnInfrastructureError keeps the guard that
+// makes the gate above meaningful: a check shape the runner cannot
+// dispatch must abort loudly rather than report a silent pass.
+func TestUnrunnableConfigurationIsAnInfrastructureError(t *testing.T) {
+	exec := &fakeExec{t: t, respond: value("1")}
+	_, err := Run(context.Background(), []config.Check{{Builtin: "not_registered"}}, testDeps(exec))
+	if err == nil || !strings.Contains(err.Error(), "unrunnable check configuration") {
+		t.Fatalf("err = %v, want an unrunnable-configuration failure", err)
+	}
+}

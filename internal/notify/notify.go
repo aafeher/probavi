@@ -34,8 +34,11 @@ const (
 	// timeout so cancelled drills still notify.
 	Budget = 60 * time.Second
 
-	attemptTimeout = 10 * time.Second
-	attempts       = 3
+	// AttemptTimeout bounds one delivery attempt.
+	AttemptTimeout = 10 * time.Second
+	// Attempts is how many times one webhook is tried before giving up.
+	Attempts = 3
+
 	// maxDrain caps how much of a response body is read before closing;
 	// receivers are untrusted and only the status code matters.
 	maxDrain = 4 << 10
@@ -43,6 +46,20 @@ const (
 
 // Event is the only notification event of schema version 1.
 const Event = "drill.completed"
+
+// Request headers every delivery carries (docs/notifications.md §4).
+const (
+	// HeaderEvent names the event, so a receiver can route without
+	// parsing the body.
+	HeaderEvent = "X-Probavi-Event"
+	// HeaderSignature carries the optional HMAC-SHA256 of the body,
+	// GitHub-style as "sha256=<hex>".
+	HeaderSignature = "X-Probavi-Signature-256"
+	// ContentType is the body's media type.
+	ContentType = "application/json"
+	// SignatureAlgorithm names the MAC in the capabilities manifest.
+	SignatureAlgorithm = "HMAC-SHA256"
+)
 
 // webhook is one resolved destination. The URL may have come from the
 // environment and is treated as a credential everywhere: log lines and
@@ -96,7 +113,7 @@ func New(cfg *config.Notify, version string, logger *slog.Logger) (*Notifier, er
 	return &Notifier{
 		webhooks: hooks,
 		client: &http.Client{
-			Timeout: attemptTimeout,
+			Timeout: AttemptTimeout,
 			// Redirects are never followed: a redirect could hand a
 			// token-bearing URL or signed body to an unintended host
 			// (docs/notifications.md §3).
@@ -153,7 +170,7 @@ func (n *Notifier) Send(ctx context.Context, rec *evidence.Record) error {
 // transport errors and 5xx only, with backoff that honors cancellation.
 func (n *Notifier) deliver(ctx context.Context, h webhook, body []byte) error {
 	var last error
-	for attempt := range attempts {
+	for attempt := range Attempts {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
@@ -170,7 +187,7 @@ func (n *Notifier) deliver(ctx context.Context, h webhook, body []byte) error {
 			return err
 		}
 	}
-	return fmt.Errorf("after %d attempts: %w", attempts, last)
+	return fmt.Errorf("after %d attempts: %w", Attempts, last)
 }
 
 // post makes one delivery attempt. Errors are redacted before they leave:
@@ -183,15 +200,15 @@ func (n *Notifier) post(ctx context.Context, h webhook, body []byte) (retryable 
 		// regardless.
 		return false, errors.New("build request: invalid URL")
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", ContentType)
 	req.Header.Set("User-Agent", "probavi/"+n.version)
-	req.Header.Set("X-Probavi-Event", Event)
+	req.Header.Set(HeaderEvent, Event)
 	if h.secret != nil {
 		mac := hmac.New(sha256.New, h.secret)
 		if _, werr := mac.Write(body); werr != nil {
 			return false, fmt.Errorf("sign payload: %w", werr)
 		}
-		req.Header.Set("X-Probavi-Signature-256", "sha256="+hex.EncodeToString(mac.Sum(nil)))
+		req.Header.Set(HeaderSignature, "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 	resp, err := n.client.Do(req)
 	if err != nil {

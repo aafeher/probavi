@@ -150,6 +150,32 @@ jobs:
         # this job exists to prove.
         run: PROBAVI_IT_K8S=1 PROBAVI_IT_SSH=1 PROBAVI_IT_REMOTEHOST=1 go test -race -tags integration ./...
 
+  capabilities:
+    name: Capabilities manifest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: regenerate docs/capabilities.json
+        # Exactly the command a developer runs, so the //go:generate
+        # directive is exercised too, not only the tool behind it.
+        run: go generate ./...
+      - name: fail on drift
+        # docs/capabilities.json is the public statement of what Probavi
+        # can do, read downstream through a submodule. A capability that
+        # ships without regenerating it would publish a stale claim, so a
+        # dirty tree here blocks merge like any other gate (AGENTS.md §5.8).
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::docs/capabilities.json is stale — run 'go generate ./...' and commit the result (AGENTS.md §5.8)"
+            git --no-pager diff
+            git status --porcelain
+            exit 1
+          fi
+
   vulncheck:
     name: Known-vulnerability scan
     runs-on: ubuntu-latest

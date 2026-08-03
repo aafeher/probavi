@@ -13,19 +13,35 @@ import (
 	"time"
 
 	"github.com/aafeher/probavi/internal/adapter"
+	"github.com/aafeher/probavi/internal/capabilities"
 	"github.com/aafeher/probavi/internal/sandbox"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
 )
 
-const mongoImage = "mongo:7"
+// verifiedImage is the engine image adapter.json declares this adapter
+// verified against. The manifest and this suite read the same value, so
+// docs/capabilities.json can never claim an engine version CI does not
+// actually restore from (docs/capabilities.md §1).
+func verifiedImage(t *testing.T) string {
+	t.Helper()
+	m, err := capabilities.LoadAdapterManifest(".")
+	if err != nil {
+		t.Fatalf("load adapter manifest: %v", err)
+	}
+	image, err := m.VerifiedImage()
+	if err != nil {
+		t.Fatalf("adapter manifest: %v", err)
+	}
+	return image
+}
 
 // sandboxParams returns the documented drill-config sandbox params: the
 // image runs bare — no MONGO_INITDB_* variables — so mongod starts without
 // access control and without the first-boot temporary server. Zero-ingress
 // sandboxes (--network none, no ports expressible) are the only reason
 // that is acceptable.
-func sandboxParams() map[string]string {
-	return map[string]string{"image": mongoImage}
+func sandboxParams(t *testing.T) map[string]string {
+	return map[string]string{"image": verifiedImage(t)}
 }
 
 // TestEndToEndRestoreDrill proves the third engine through the unchanged
@@ -58,7 +74,7 @@ func TestEndToEndRestoreDrill(t *testing.T) {
 // restored data through the sql_runner.
 func driveDrill(t *testing.T, ctx context.Context, provider *docker.Provider, fixture string) {
 	t.Helper()
-	sbx, err := provider.Create(ctx, sandboxParams())
+	sbx, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create drill sandbox: %v", err)
 	}
@@ -143,7 +159,7 @@ func TestCorruptArchiveVerdict(t *testing.T) {
 	}
 
 	provider := docker.New(nil)
-	sbx, err := provider.Create(ctx, sandboxParams())
+	sbx, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create sandbox: %v", err)
 	}
@@ -179,7 +195,7 @@ func buildAdapterOnPath(t *testing.T, ctx context.Context) {
 // (plain and gzip) to the host.
 func makeFixtures(t *testing.T, ctx context.Context, provider *docker.Provider, plainDest, gzipDest string) {
 	t.Helper()
-	seed, err := provider.Create(ctx, sandboxParams())
+	seed, err := provider.Create(ctx, sandboxParams(t))
 	if err != nil {
 		t.Fatalf("create seed sandbox: %v", err)
 	}

@@ -90,7 +90,7 @@ func TestNewDefaults(t *testing.T) {
 func fullManifest(t *testing.T) (*jobManifest, *Provider) {
 	t.Helper()
 	p, _ := testProvider(t)
-	m, namespace, err := p.manifest(map[string]string{
+	m, namespace, err := p.manifest(Descriptor, map[string]string{
 		"image":     "postgres:16",
 		"namespace": "drills",
 		"memory":    "2Gi",
@@ -150,7 +150,7 @@ func TestManifestPodShape(t *testing.T) {
 
 func TestManifestMinimal(t *testing.T) {
 	p, _ := testProvider(t)
-	m, namespace, err := p.manifest(map[string]string{"image": "x:1"})
+	m, namespace, err := p.manifest(Descriptor, map[string]string{"image": "x:1"})
 	if err != nil {
 		t.Fatalf("manifest: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestManifestRejects(t *testing.T) {
 		"bad env name":  {"image": "x:1", "env.1BAD": "v"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := p.manifest(params); !errors.Is(err, sandbox.ErrInvalidParams) {
+			if _, _, err := p.manifest(Descriptor, params); !errors.Is(err, sandbox.ErrInvalidParams) {
 				t.Errorf("manifest(%v): %v, want ErrInvalidParams", params, err)
 			}
 		})
@@ -514,4 +514,50 @@ func TestSweepOrphans(t *testing.T) {
 			t.Errorf("delete failure: %v", err)
 		}
 	})
+}
+
+// TestManifestAcceptsEveryDeclaredParam proves the published parameter
+// list is one a drill config can actually use.
+func TestManifestAcceptsEveryDeclaredParam(t *testing.T) {
+	params := map[string]string{
+		"image": "postgres:16", "namespace": "drills", "memory": "512Mi",
+		"cpus": "1", "command": "sleep 1", "env.FOO": "bar",
+	}
+	for _, p := range Descriptor.Params {
+		if _, ok := params[p.Name]; !ok && !p.Family {
+			t.Fatalf("declared param %q has no sample value in this test", p.Name)
+		}
+	}
+	m, namespace, err := New(nil).manifest(Descriptor, params)
+	if err != nil {
+		t.Fatalf("manifest: %v", err)
+	}
+	c := m.Spec.Template.Spec.Containers[0]
+	switch {
+	case namespace != "drills":
+		t.Errorf("namespace %q, want drills", namespace)
+	case c.Image != "postgres:16":
+		t.Errorf("image %q", c.Image)
+	case !slices.Equal(c.Command, []string{"sleep", "1"}):
+		t.Errorf("command %v", c.Command)
+	case c.Resources == nil || c.Resources.Limits["memory"] != "512Mi" || c.Resources.Limits["cpu"] != "1":
+		t.Errorf("resources %+v", c.Resources)
+	case len(c.Env) != 1 || c.Env[0].Name != "FOO" || c.Env[0].Value != "bar":
+		t.Errorf("env %+v", c.Env)
+	}
+}
+
+// TestManifestRejectsUnhandledDeclaredParam covers the defect path: a
+// declared parameter the manifest builder never applies.
+func TestManifestRejectsUnhandledDeclaredParam(t *testing.T) {
+	d := Descriptor
+	d.Params = append(append([]sandbox.Param{}, d.Params...),
+		sandbox.Param{Name: "readonly", Doc: "Declared but not implemented."})
+	_, _, err := New(nil).manifest(d, map[string]string{"image": "postgres:16", "readonly": "true"})
+	if !errors.Is(err, sandbox.ErrInvalidParams) {
+		t.Fatalf("error %v is not ErrInvalidParams", err)
+	}
+	if !strings.Contains(err.Error(), "declared but not implemented") {
+		t.Errorf("error %q does not explain the defect", err)
+	}
 }

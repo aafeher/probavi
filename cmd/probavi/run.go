@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/aafeher/probavi/internal/adapter"
+	"github.com/aafeher/probavi/internal/cli"
 	"github.com/aafeher/probavi/internal/config"
 	"github.com/aafeher/probavi/internal/conformance"
 	"github.com/aafeher/probavi/internal/core"
@@ -27,6 +28,7 @@ import (
 	"github.com/aafeher/probavi/internal/notify"
 	"github.com/aafeher/probavi/internal/sandbox/docker"
 	"github.com/aafeher/probavi/internal/sandbox/k8s"
+	"github.com/aafeher/probavi/internal/sandbox/registry"
 	"github.com/aafeher/probavi/internal/sandbox/remotehost"
 )
 
@@ -37,11 +39,13 @@ import (
 var version = "0.1.0-dev"
 
 // Exit codes for `probavi run` (cron/CI contract, documented in usage).
+// The numbers come from internal/cli, which declares the contract the
+// capabilities manifest publishes.
 const (
-	exitPass         = 0
-	exitFail         = 1
-	exitError        = 2
-	exitEvidenceLost = 5
+	exitPass         = cli.ExitPass
+	exitFail         = cli.ExitFail
+	exitError        = cli.ExitError
+	exitEvidenceLost = cli.ExitEvidenceLost
 )
 
 func runDrill(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
@@ -270,18 +274,19 @@ func summarize(rec *evidence.Record, evidencePath string) gameday.DrillSummary {
 // runs against the configured workspace root before any Create.
 func sandboxProvider(name string, params map[string]string, logger *slog.Logger) (core.Provider, error) {
 	switch name {
-	case "docker":
+	case docker.Descriptor.ID:
 		return dockerProvider{docker.New(logger)}, nil
-	case "k8s":
+	case k8s.Descriptor.ID:
 		return k8sProvider{k8s.New(logger)}, nil
-	case "remotehost":
+	case remotehost.Descriptor.ID:
 		p, err := remotehost.New(logger, params)
 		if err != nil {
 			return nil, err
 		}
 		return remotehostProvider{p}, nil
 	default:
-		return nil, fmt.Errorf("unsupported sandbox provider %q (supported: docker, k8s, remotehost)", name)
+		return nil, fmt.Errorf("unsupported sandbox provider %q (supported: %s)",
+			name, strings.Join(registry.IDs(), ", "))
 	}
 }
 

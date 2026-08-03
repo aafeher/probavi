@@ -93,13 +93,13 @@ func runOne(ctx context.Context, c *config.Check, i int, deps *Deps) (*Result, e
 	switch {
 	case c.SQL != "":
 		ok, detail, err = runSQL(ctx, deps, c.SQL, c.Expect.String())
-	case c.Builtin == "service_healthy":
+	case c.Builtin == config.CheckServiceHealthy:
 		ok, detail, err = deps.Healthcheck(ctx)
-	case c.Builtin == "table_exists":
+	case c.Builtin == config.CheckTableExists:
 		ok, detail, err = runTableExists(ctx, deps, c.Table)
-	case c.Builtin == "row_count":
+	case c.Builtin == config.CheckRowCount:
 		ok, detail, err = runRowCount(ctx, deps, c)
-	case c.Builtin == "freshness":
+	case c.Builtin == config.CheckFreshness:
 		ok, detail, err = runFreshness(ctx, deps, c)
 	default:
 		// config.Load validates check shapes; reaching this is a bug.
@@ -125,9 +125,9 @@ func checkName(c *config.Check, i int) string {
 		return "sql:" + strconv.Itoa(i)
 	}
 	switch c.Builtin {
-	case "table_exists", "row_count":
+	case config.CheckTableExists, config.CheckRowCount:
 		return c.Builtin + ":" + c.Table
-	case "freshness":
+	case config.CheckFreshness:
 		return c.Builtin + ":" + c.Table + "." + c.Column
 	default:
 		return c.Builtin

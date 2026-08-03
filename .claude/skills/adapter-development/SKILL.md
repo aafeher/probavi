@@ -30,3 +30,9 @@ description: Rules and workflow for creating or modifying Probavi engine adapter
 ## Definition of done
 
 Conformance passes (once the Phase 2 suite exists — until then: every protocol MUST covered by tests); no stdout pollution; teardown-after-crash test exists; timings are real measurements; README for the adapter documents supported source kinds and env vars.
+
+Plus the published-capability half:
+
+- `adapters/<id>/adapter.json` carries a display name for **every** source kind the probe declares (the generator fails on any mismatch, in either direction), the engine versions and images CI restores from, the maturity value, and `conformance_verified` — which makes the conformance suite drive this adapter, so the claim cannot be aspirational.
+- Re-run `go generate ./...` so `docs/capabilities.json` reflects the adapter, and commit it in the same PR. CI fails on any diff (AGENTS.md §5.8).
+- Never widen "verified against" into "supports": the manifest states the versions this repository actually restores from, nothing more.

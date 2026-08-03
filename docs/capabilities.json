@@ -1,0 +1,773 @@
+{
+  "$schema": "https://probavi.dev/schemas/capabilities/capabilities.json",
+  "_generated": "GENERATED FILE — do not edit by hand. Produced by `go generate ./...` from the code that implements each capability; edits are overwritten and CI fails on any diff. Contract: docs/capabilities.md",
+  "schema": "probavi-capabilities/1",
+  "project": {
+    "status": "pre-alpha",
+    "license": "Apache-2.0",
+    "repository": "https://github.com/aafeher/probavi"
+  },
+  "contracts": {
+    "adapter_protocol": {
+      "version": "probavi-adapter/0",
+      "spec": "docs/adapter-protocol.md",
+      "schema": "docs/schemas/adapter/"
+    },
+    "evidence_schema": {
+      "version": "probavi-evidence/1",
+      "readable_versions": [
+        "probavi-evidence/0",
+        "probavi-evidence/1"
+      ],
+      "spec": "docs/evidence-schema.md",
+      "schema": "docs/schemas/evidence/record.json",
+      "independent_verifier": "spec/evidence"
+    },
+    "notification_payload": {
+      "version": "probavi-notification/1",
+      "spec": "docs/notifications.md",
+      "schema": "docs/schemas/notification/payload.json"
+    }
+  },
+  "adapters": [
+    {
+      "id": "mongodb",
+      "name": "MongoDB",
+      "status": "experimental",
+      "adapter_version": "0.1.0",
+      "engine": {
+        "id": "mongodb",
+        "name": "MongoDB"
+      },
+      "protocol_versions": [
+        "probavi-adapter/0"
+      ],
+      "verified": [
+        {
+          "engine_version": "7",
+          "image": "mongo:7"
+        }
+      ],
+      "sources": [
+        {
+          "id": "mongodump",
+          "name": "One mongodump archive, plain or gzip",
+          "pitr": false
+        },
+        {
+          "id": "mongodump_dir",
+          "name": "A directory of mongodump archives; the newest is restored",
+          "pitr": false
+        }
+      ],
+      "pitr": false,
+      "conformance_verified": true,
+      "docs": "adapters/mongodb/README.md"
+    },
+    {
+      "id": "mssql",
+      "name": "SQL Server",
+      "status": "experimental",
+      "adapter_version": "0.1.0",
+      "engine": {
+        "id": "sqlserver",
+        "name": "Microsoft SQL Server"
+      },
+      "protocol_versions": [
+        "probavi-adapter/0"
+      ],
+      "verified": [
+        {
+          "engine_version": "2022",
+          "image": "mcr.microsoft.com/mssql/server:2022-latest"
+        }
+      ],
+      "sources": [
+        {
+          "id": "bak",
+          "name": "One native SQL Server .bak backup file",
+          "pitr": false
+        },
+        {
+          "id": "bak_dir",
+          "name": "A directory of .bak files; the newest is restored",
+          "pitr": false
+        }
+      ],
+      "pitr": false,
+      "conformance_verified": true,
+      "docs": "adapters/mssql/README.md"
+    },
+    {
+      "id": "mysql",
+      "name": "MySQL",
+      "status": "experimental",
+      "adapter_version": "0.2.0",
+      "engine": {
+        "id": "mysql",
+        "name": "MySQL"
+      },
+      "protocol_versions": [
+        "probavi-adapter/0"
+      ],
+      "verified": [
+        {
+          "engine_version": "8.4",
+          "image": "mysql:8.4"
+        }
+      ],
+      "sources": [
+        {
+          "id": "mysqldump",
+          "name": "One mysqldump SQL file",
+          "pitr": false
+        },
+        {
+          "id": "mysqldump_dir",
+          "name": "A directory of mysqldump files; the newest is restored",
+          "pitr": false
+        },
+        {
+          "id": "xtrabackup",
+          "name": "An unprepared Percona XtraBackup full backup (physical restore)",
+          "pitr": false
+        }
+      ],
+      "pitr": false,
+      "conformance_verified": true,
+      "docs": "adapters/mysql/README.md"
+    },
+    {
+      "id": "postgres",
+      "name": "PostgreSQL",
+      "status": "experimental",
+      "adapter_version": "0.3.0",
+      "engine": {
+        "id": "postgresql",
+        "name": "PostgreSQL"
+      },
+      "protocol_versions": [
+        "probavi-adapter/0"
+      ],
+      "verified": [
+        {
+          "engine_version": "16",
+          "image": "postgres:16"
+        }
+      ],
+      "sources": [
+        {
+          "id": "pgbackrest",
+          "name": "A pgBackRest filesystem repository (physical restore)",
+          "pitr": true
+        },
+        {
+          "id": "pgdump",
+          "name": "One pg_dump custom-format (-Fc) file",
+          "pitr": false
+        },
+        {
+          "id": "pgdump_dir",
+          "name": "A directory of pg_dump files; the newest is restored",
+          "pitr": false
+        }
+      ],
+      "pitr": true,
+      "conformance_verified": true,
+      "docs": "adapters/postgres/README.md"
+    }
+  ],
+  "sandbox_providers": [
+    {
+      "id": "docker",
+      "name": "Docker",
+      "status": "experimental",
+      "params": [
+        {
+          "id": "image",
+          "required": true,
+          "default": null,
+          "doc": "Sandbox image; it must contain the engine and the restore tooling the adapter drives."
+        },
+        {
+          "id": "network",
+          "required": false,
+          "default": "none",
+          "doc": "Docker network the sandbox joins."
+        },
+        {
+          "id": "memory",
+          "required": false,
+          "default": null,
+          "doc": "Container memory limit (docker run --memory)."
+        },
+        {
+          "id": "cpus",
+          "required": false,
+          "default": null,
+          "doc": "Container CPU limit (docker run --cpus)."
+        },
+        {
+          "id": "command",
+          "required": false,
+          "default": null,
+          "doc": "Container command override, split on whitespace and executed without a shell — for engines the adapter starts itself."
+        },
+        {
+          "id": "env.<NAME>",
+          "required": false,
+          "default": null,
+          "doc": "Environment variable set inside the sandbox."
+        }
+      ],
+      "isolation": {
+        "network_default": "none",
+        "published_ports": false,
+        "storage": "container filesystem and anonymous volumes, removed with the container",
+        "forced_teardown": true,
+        "orphan_sweep": "host- and pid-scoped labels, swept at drill start",
+        "external_backstop": null
+      },
+      "constraints": [
+        "Requires a reachable Docker daemon; the docker CLI is driven directly, never the SDK.",
+        "Remote daemons work unchanged through the CLI's native SSH transport (DOCKER_HOST=ssh://user@host). The endpoint stays in the environment: sandbox params are recorded verbatim in signed evidence, and connection details must never appear there.",
+        "Publishing ports is not expressible: the provider never emits -p."
+      ],
+      "verified_against": [
+        "local Docker daemon (CI integration suite)",
+        "remote daemon over the docker CLI SSH transport (CI integration suite)"
+      ],
+      "docs": null
+    },
+    {
+      "id": "k8s",
+      "name": "Kubernetes Job",
+      "status": "experimental",
+      "params": [
+        {
+          "id": "image",
+          "required": true,
+          "default": null,
+          "doc": "Sandbox image; it must contain the engine and the restore tooling the adapter drives."
+        },
+        {
+          "id": "namespace",
+          "required": false,
+          "default": "default",
+          "doc": "Namespace the Job is created in."
+        },
+        {
+          "id": "memory",
+          "required": false,
+          "default": null,
+          "doc": "Container memory request and limit, set equal so the pod is guaranteed."
+        },
+        {
+          "id": "cpus",
+          "required": false,
+          "default": null,
+          "doc": "Container CPU request and limit, set equal so the pod is guaranteed."
+        },
+        {
+          "id": "command",
+          "required": false,
+          "default": null,
+          "doc": "Container command override, split on whitespace — for engines the adapter starts itself."
+        },
+        {
+          "id": "env.<NAME>",
+          "required": false,
+          "default": null,
+          "doc": "Environment variable set inside the sandbox."
+        }
+      ],
+      "isolation": {
+        "network_default": null,
+        "published_ports": false,
+        "storage": "pod filesystem, deleted with the Job",
+        "forced_teardown": true,
+        "orphan_sweep": "host- and pid-scoped labels, swept at drill start",
+        "external_backstop": "cluster-side: activeDeadlineSeconds 7200 then TTL 600s, so a sandbox dies even if the drill host does"
+      },
+      "constraints": [
+        "Requires a working kubectl context with rights to create, exec into, and delete Jobs in the target namespace; the kubectl CLI is driven directly, never client-go.",
+        "Network isolation is the cluster's job: the pod carries the sandbox label so a NetworkPolicy can select it. There is no pod-level equivalent of the docker provider's --network none.",
+        "The pod runs with no service-account token, no service links, and the RuntimeDefault seccomp profile."
+      ],
+      "verified_against": [
+        "kind cluster (CI integration suite)"
+      ],
+      "docs": null
+    },
+    {
+      "id": "remotehost",
+      "name": "Bare host over SSH",
+      "status": "experimental",
+      "params": [
+        {
+          "id": "workspace_root",
+          "required": false,
+          "default": "/var/lib/probavi-drills",
+          "doc": "Absolute path on the target holding per-drill workspaces."
+        },
+        {
+          "id": "memory",
+          "required": false,
+          "default": null,
+          "doc": "MemoryMax of the drill's transient systemd slice (systemd size suffixes)."
+        },
+        {
+          "id": "cpus",
+          "required": false,
+          "default": null,
+          "doc": "CPUQuota of the drill's transient systemd slice (decimal CPU count)."
+        }
+      ],
+      "isolation": {
+        "network_default": null,
+        "published_ports": false,
+        "storage": "per-drill workspace under the workspace root, mode 0700, deleted (not shredded) at teardown",
+        "forced_teardown": true,
+        "orphan_sweep": "host-scoped owner markers under the workspace root, swept at drill start",
+        "external_backstop": "target-side transient systemd timer stops the slice and removes the workspace 7200s after creation, so restored data does not outlive a vanished drill host"
+      },
+      "constraints": [
+        "No container isolation. A dedicated drill host is a premise of this provider, not a recommendation.",
+        "systemd 244 or newer on the target, probed at first contact.",
+        "Engine and tool versions are whatever the target host has installed; the version match a sandbox image guarantees does not apply here.",
+        "Requires the right to run transient systemd units as the drill user — the polkit rule the README ships.",
+        "The target is named by the PROBAVI_SSH_TARGET environment variable only, never in drill config: sandbox params are recorded verbatim in signed evidence, and connection details must never appear there."
+      ],
+      "verified_against": [
+        "systemd host over the OpenSSH CLI (CI integration suite)"
+      ],
+      "docs": "docs/sandbox-bare-host.md"
+    }
+  ],
+  "checks": [
+    {
+      "id": "service_healthy",
+      "name": "Engine answers the adapter's healthcheck",
+      "status": "experimental",
+      "kind": "builtin",
+      "params": [],
+      "requires": null
+    },
+    {
+      "id": "table_exists",
+      "name": "Table exists and is queryable",
+      "status": "experimental",
+      "kind": "builtin",
+      "params": [
+        {
+          "id": "table",
+          "type": "identifier",
+          "required": true,
+          "doc": "Table, optionally schema-qualified."
+        }
+      ],
+      "requires": null
+    },
+    {
+      "id": "row_count",
+      "name": "Row count within bounds",
+      "status": "experimental",
+      "kind": "builtin",
+      "params": [
+        {
+          "id": "table",
+          "type": "identifier",
+          "required": true,
+          "doc": "Table, optionally schema-qualified."
+        },
+        {
+          "id": "min",
+          "type": "integer",
+          "required": false,
+          "doc": "Lower bound, inclusive."
+        },
+        {
+          "id": "max",
+          "type": "integer",
+          "required": false,
+          "doc": "Upper bound, inclusive."
+        }
+      ],
+      "requires": "At least one of min, max."
+    },
+    {
+      "id": "freshness",
+      "name": "Newest row younger than a maximum age",
+      "status": "experimental",
+      "kind": "builtin",
+      "params": [
+        {
+          "id": "table",
+          "type": "identifier",
+          "required": true,
+          "doc": "Table, optionally schema-qualified."
+        },
+        {
+          "id": "column",
+          "type": "identifier",
+          "required": true,
+          "doc": "Timestamp column to take the maximum of."
+        },
+        {
+          "id": "max_age",
+          "type": "duration",
+          "required": true,
+          "doc": "Maximum age of the newest row."
+        }
+      ],
+      "requires": null
+    },
+    {
+      "id": "sql",
+      "name": "Custom SQL assertion",
+      "status": "experimental",
+      "kind": "sql",
+      "params": [
+        {
+          "id": "sql",
+          "type": "string",
+          "required": true,
+          "doc": "Statement run through the adapter-declared sql_runner."
+        },
+        {
+          "id": "expect",
+          "type": "scalar",
+          "required": true,
+          "doc": "Expected single scalar result."
+        },
+        {
+          "id": "name",
+          "type": "string",
+          "required": false,
+          "doc": "Check name recorded in evidence; defaults to the check index."
+        }
+      ],
+      "requires": null
+    }
+  ],
+  "cli": {
+    "binary": "probavi",
+    "commands": [
+      {
+        "id": "run",
+        "name": "probavi run",
+        "status": "experimental",
+        "summary": "Execute one restore drill: sandbox up, restore, checks, teardown, and exactly one signed evidence record.",
+        "flags": [
+          {
+            "id": "--config",
+            "required": true,
+            "repeatable": false,
+            "doc": "Path to the drill configuration YAML."
+          }
+        ],
+        "positional": null,
+        "stdout": "one-line JSON drill summary",
+        "exit_codes": [
+          {
+            "code": 0,
+            "meaning": "backup proven restorable"
+          },
+          {
+            "code": 1,
+            "meaning": "recoverability failure (backup, restore, or check)"
+          },
+          {
+            "code": 2,
+            "meaning": "infrastructure error or cancelled"
+          },
+          {
+            "code": 3,
+            "meaning": "usage or setup error"
+          },
+          {
+            "code": 5,
+            "meaning": "evidence record could not be written"
+          }
+        ],
+        "docs": null
+      },
+      {
+        "id": "gameday",
+        "name": "probavi gameday",
+        "status": "experimental",
+        "summary": "Execute a DR game-day: member drills in dependency order, each leaving its own signed evidence record.",
+        "flags": [
+          {
+            "id": "--config",
+            "required": true,
+            "repeatable": false,
+            "doc": "Path to the game-day configuration YAML."
+          }
+        ],
+        "positional": null,
+        "stdout": "one-line JSON game-day summary",
+        "exit_codes": [
+          {
+            "code": 0,
+            "meaning": "every member passed"
+          },
+          {
+            "code": 1,
+            "meaning": "a member drill failed"
+          },
+          {
+            "code": 2,
+            "meaning": "errors or cancellation left members unproven"
+          },
+          {
+            "code": 3,
+            "meaning": "usage or setup error"
+          },
+          {
+            "code": 5,
+            "meaning": "a member's evidence record could not be written"
+          }
+        ],
+        "docs": "docs/gameday.md"
+      },
+      {
+        "id": "evidence verify",
+        "name": "probavi evidence verify",
+        "status": "experimental",
+        "summary": "Verify an evidence log offline against one or more public keys.",
+        "flags": [
+          {
+            "id": "--log",
+            "required": true,
+            "repeatable": false,
+            "doc": "Path to the evidence log file."
+          },
+          {
+            "id": "--key",
+            "required": true,
+            "repeatable": true,
+            "doc": "Public key file; repeat to build a keyring."
+          }
+        ],
+        "positional": null,
+        "stdout": "one-line JSON verification result",
+        "exit_codes": [
+          {
+            "code": 0,
+            "meaning": "VALID"
+          },
+          {
+            "code": 1,
+            "meaning": "VALID_WITH_DAMAGE"
+          },
+          {
+            "code": 2,
+            "meaning": "INVALID"
+          },
+          {
+            "code": 3,
+            "meaning": "usage or I/O error"
+          }
+        ],
+        "docs": "docs/evidence-schema.md"
+      },
+      {
+        "id": "evidence keygen",
+        "name": "probavi evidence keygen",
+        "status": "experimental",
+        "summary": "Generate an ed25519 signing key pair; refuses to overwrite existing files.",
+        "flags": [
+          {
+            "id": "--out",
+            "required": true,
+            "repeatable": false,
+            "doc": "Path for the private key; the public key is written next to it as <path>.pub."
+          }
+        ],
+        "positional": null,
+        "stdout": "one-line JSON key identity, never key material",
+        "exit_codes": [
+          {
+            "code": 0,
+            "meaning": "key pair written"
+          },
+          {
+            "code": 3,
+            "meaning": "usage or I/O error"
+          }
+        ],
+        "docs": "docs/evidence-schema.md"
+      },
+      {
+        "id": "adapter probe",
+        "name": "probavi adapter probe",
+        "status": "experimental",
+        "summary": "Resolve probavi-adapter-<name> and print its declared capabilities.",
+        "flags": [],
+        "positional": "<name>",
+        "stdout": "JSON probe response",
+        "exit_codes": [
+          {
+            "code": 0,
+            "meaning": "probe succeeded"
+          },
+          {
+            "code": 2,
+            "meaning": "the adapter failed to probe"
+          },
+          {
+            "code": 3,
+            "meaning": "usage error or the adapter could not be resolved"
+          }
+        ],
+        "docs": "docs/adapter-protocol.md"
+      },
+      {
+        "id": "adapter conformance",
+        "name": "probavi adapter conformance",
+        "status": "experimental",
+        "summary": "Drive an adapter through the frozen protocol conformance checks against a simulated sandbox — no container runtime involved.",
+        "flags": [
+          {
+            "id": "--source-kind",
+            "required": false,
+            "repeatable": false,
+            "doc": "Source kind for the provision checks; defaults to the first kind the probe declares."
+          },
+          {
+            "id": "--source-param",
+            "required": false,
+            "repeatable": true,
+            "doc": "Source parameter as k=v for the provision checks."
+          }
+        ],
+        "positional": "<name-or-path>",
+        "stdout": "JSON conformance report",
+        "exit_codes": [
+          {
+            "code": 0,
+            "meaning": "conformant"
+          },
+          {
+            "code": 1,
+            "meaning": "one or more checks failed"
+          },
+          {
+            "code": 2,
+            "meaning": "the suite could not be run to completion"
+          },
+          {
+            "code": 3,
+            "meaning": "usage error or the adapter could not be resolved"
+          }
+        ],
+        "docs": "docs/adapter-protocol.md"
+      },
+      {
+        "id": "version",
+        "name": "probavi version",
+        "status": "experimental",
+        "summary": "Print the binary version and the contract versions this build speaks.",
+        "flags": [],
+        "positional": null,
+        "stdout": "version lines",
+        "exit_codes": [
+          {
+            "code": 0,
+            "meaning": "version printed"
+          }
+        ],
+        "docs": null
+      }
+    ]
+  },
+  "notifications": {
+    "payload_version": "probavi-notification/1",
+    "event": "drill.completed",
+    "transports": [
+      {
+        "id": "webhook",
+        "name": "HTTP webhook",
+        "status": "experimental",
+        "method": "POST",
+        "content_type": "application/json",
+        "event_header": "X-Probavi-Event",
+        "signing": {
+          "algorithm": "HMAC-SHA256",
+          "header": "X-Probavi-Signature-256",
+          "optional": true
+        },
+        "outcome_filter": [
+          "cancelled",
+          "error",
+          "fail",
+          "pass"
+        ],
+        "delivery": {
+          "attempts": 3,
+          "attempt_timeout_seconds": 10,
+          "total_budget_seconds": 60
+        },
+        "docs": "docs/notifications.md"
+      }
+    ]
+  },
+  "locales": {
+    "source": "en",
+    "available": [
+      "bg",
+      "cs",
+      "da",
+      "de",
+      "el",
+      "en",
+      "es",
+      "et",
+      "fi",
+      "fr",
+      "ga",
+      "hr",
+      "hu",
+      "it",
+      "lt",
+      "lv",
+      "mt",
+      "nl",
+      "pl",
+      "pt",
+      "ro",
+      "sk",
+      "sl",
+      "sv"
+    ],
+    "scope": "CLI usage text and diagnostics only. Evidence records, machine-readable JSON outputs, structured logs, the adapter protocol, notification payloads, and configuration keys are never translated.",
+    "docs": "docs/i18n.md"
+  },
+  "non_goals": [
+    {
+      "id": "backup_engine",
+      "statement": "Probavi takes no backups. It verifies backups produced by other tools — pgBackRest, wal-g, Barman, mysqldump and their equivalents — which are its foundation, never its competitors."
+    },
+    {
+      "id": "scheduler",
+      "statement": "Probavi ships no scheduler and no daemon of its own. Drills are started by cron or a systemd timer, with a lock file and a timeout."
+    },
+    {
+      "id": "database_host_daemon",
+      "statement": "Probavi runs no agent or daemon on database hosts."
+    },
+    {
+      "id": "secrets_management",
+      "statement": "Probavi manages no secrets. It reads credentials from environment variables or files for the duration of one drill, and redacts them from logs and evidence."
+    },
+    {
+      "id": "telemetry",
+      "statement": "Probavi has no telemetry and never phones home. It is a trust product; that is not negotiable."
+    },
+    {
+      "id": "web_ui",
+      "statement": "Probavi ships no web interface. The shipped surfaces are the command line, a Prometheus textfile, and webhooks."
+    }
+  ]
+}

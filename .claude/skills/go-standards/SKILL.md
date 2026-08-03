@@ -26,6 +26,7 @@ Full standards live in `AGENTS.md` §3 — read that section if you have not in 
 - [ ] `go test -race ./...` passes; coverage does not decrease (near-100% for `internal/evidence` and `internal/adapter`).
 - [ ] New dependency? One-line justification required; prefer stdlib; pin versions; `govulncheck` clean.
 - [ ] Never lower, disable, or bypass a quality gate (linter suppression, skipped test, coverage exclusion) to make something pass — that is design feedback; fix the design.
+- [ ] Shipped a new adapter, sandbox provider, built-in check, CLI command or exit code, notification transport, locale catalog, or contract version? Declare it in the registry that drives the code (`config.CheckKinds()`, a sandbox `Descriptor`, `internal/cli`, `adapters/<id>/adapter.json`), then re-run `go generate ./...` and commit `docs/capabilities.json` in the same PR — never hand-edit it (AGENTS.md §5.8).
 
 ## Commits and PRs
 

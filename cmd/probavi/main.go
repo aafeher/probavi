@@ -13,17 +13,20 @@ import (
 	"strings"
 
 	"github.com/aafeher/probavi/internal/adapter"
+	"github.com/aafeher/probavi/internal/cli"
 	"github.com/aafeher/probavi/internal/evidence"
 	"github.com/aafeher/probavi/internal/i18n"
 )
 
 // Exit codes. Verify verdicts follow evidence-schema.md §9; exitUsage
-// covers usage and I/O errors, distinct from any verdict.
+// covers usage and I/O errors, distinct from any verdict. The numbers come
+// from internal/cli, which declares the contract the capabilities manifest
+// publishes; these names are this file's reading of them.
 const (
-	exitValid           = 0
-	exitValidWithDamage = 1
-	exitInvalid         = 2
-	exitUsage           = 3
+	exitValid           = cli.ExitPass
+	exitValidWithDamage = cli.ExitFail
+	exitInvalid         = cli.ExitError
+	exitUsage           = cli.ExitUsage
 )
 
 func main() {
@@ -37,61 +40,72 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, tr))
 }
 
+// handler runs one resolved command.
+type handler func(args []string, stdout, stderr io.Writer, tr *i18n.T) int
+
+// handlers wires every command internal/cli declares to its
+// implementation. The table there is the CLI contract — a command absent
+// from it cannot be invoked, and a command present in it without a handler
+// here is a build defect, both pinned by the cmd test suite.
+func handlers() map[string]handler {
+	return map[string]handler{
+		cli.CmdRun:                runDrill,
+		cli.CmdGameDay:            runGameDay,
+		cli.CmdEvidenceVerify:     runEvidenceVerify,
+		cli.CmdEvidenceKeygen:     runEvidenceKeygen,
+		cli.CmdAdapterProbe:       runAdapterProbe,
+		cli.CmdAdapterConformance: runAdapterConformance,
+		cli.CmdVersion: func(_ []string, stdout, _ io.Writer, tr *i18n.T) int {
+			return runVersion(stdout, tr)
+		},
+	}
+}
+
+// groupMessages maps a command group to its unknown-subcommand
+// diagnostic; the cmd test suite pins it to cli.Groups().
+func groupMessages() map[string]string {
+	return map[string]string{
+		"adapter":  msgUnknownAdapterSub,
+		"evidence": msgUnknownEvidenceSub,
+	}
+}
+
 func run(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
 	if len(args) == 0 {
 		usage(stderr, tr)
 		return exitUsage
 	}
-	switch args[0] {
-	case "run":
-		return runDrill(args[1:], stdout, stderr, tr)
-	case "gameday":
-		return runGameDay(args[1:], stdout, stderr, tr)
-	case "evidence":
-		return runEvidence(args[1:], stdout, stderr, tr)
-	case "adapter":
-		return runAdapter(args[1:], stdout, stderr, tr)
-	case "version":
-		return runVersion(stdout, tr)
-	default:
-		tr.Fprintf(stderr, msgUnknownCommand, args[0])
-		usage(stderr, tr)
-		return exitUsage
+	m := cli.Resolve(args)
+	switch m.Resolution {
+	case cli.ResolvedCommand:
+		return dispatch(handlers(), m, stdout, stderr, tr)
+	case cli.UnknownCommand:
+		tr.Fprintf(stderr, msgUnknownCommand, m.Word)
+	case cli.UnknownSubcommand:
+		format, ok := groupMessages()[m.Group]
+		if !ok {
+			format = msgUnknownCommand
+		}
+		tr.Fprintf(stderr, format, m.Word)
+	case cli.IncompleteGroup:
+		// A bare group word is answered by the usage text alone, which
+		// lists every subcommand.
 	}
+	usage(stderr, tr)
+	return exitUsage
 }
 
-func runAdapter(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
-	if len(args) == 0 {
+// dispatch invokes the resolved command. The handler table is a parameter
+// so the missing-handler path — a build defect, never a user error — is
+// reachable from tests.
+func dispatch(table map[string]handler, m cli.Match, stdout, stderr io.Writer, tr *i18n.T) int {
+	h, ok := table[m.Command.ID]
+	if !ok {
+		tr.Fprintf(stderr, msgUnknownCommand, m.Command.ID)
 		usage(stderr, tr)
 		return exitUsage
 	}
-	switch args[0] {
-	case "probe":
-		return runAdapterProbe(args[1:], stdout, stderr, tr)
-	case "conformance":
-		return runAdapterConformance(args[1:], stdout, stderr, tr)
-	default:
-		tr.Fprintf(stderr, msgUnknownAdapterSub, args[0])
-		usage(stderr, tr)
-		return exitUsage
-	}
-}
-
-func runEvidence(args []string, stdout, stderr io.Writer, tr *i18n.T) int {
-	if len(args) == 0 {
-		usage(stderr, tr)
-		return exitUsage
-	}
-	switch args[0] {
-	case "verify":
-		return runEvidenceVerify(args[1:], stdout, stderr, tr)
-	case "keygen":
-		return runEvidenceKeygen(args[1:], stdout, stderr, tr)
-	default:
-		tr.Fprintf(stderr, msgUnknownEvidenceSub, args[0])
-		usage(stderr, tr)
-		return exitUsage
-	}
+	return h(m.Args, stdout, stderr, tr)
 }
 
 // verifyOutput is the machine-readable verify result printed on stdout.

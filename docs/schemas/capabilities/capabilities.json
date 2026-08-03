@@ -1,0 +1,385 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://probavi.dev/schemas/capabilities/capabilities.json",
+  "title": "Probavi capabilities manifest — probavi-capabilities/1",
+  "description": "The machine-readable statement of what Probavi can do in its repository today (capabilities.md §1). Generated from the code that implements each capability; never hand-edited.",
+  "$comment": "Derived from docs/capabilities.md, which is normative. On any disagreement the markdown document wins.",
+  "type": "object",
+  "properties": {
+    "$schema": { "const": "https://probavi.dev/schemas/capabilities/capabilities.json" },
+    "_generated": {
+      "type": "string",
+      "minLength": 1,
+      "description": "In-file notice that the document is generated. JSON has no comments; this key is the marker."
+    },
+    "schema": {
+      "type": "string",
+      "pattern": "^probavi-capabilities/(0|[1-9][0-9]*)$",
+      "description": "Format identifier, versioned independently of the binary. A consumer that does not recognize the version must treat the document as unreadable rather than guess (capabilities.md §2)."
+    },
+    "project": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "minLength": 1 },
+        "license": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "minLength": 1 }
+      },
+      "required": ["status", "license", "repository"],
+      "additionalProperties": false
+    },
+    "contracts": {
+      "type": "object",
+      "description": "The three independently versioned contracts this build speaks.",
+      "properties": {
+        "adapter_protocol": { "$ref": "#/$defs/contract" },
+        "evidence_schema": {
+          "type": "object",
+          "properties": {
+            "version": { "type": "string", "minLength": 1 },
+            "readable_versions": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "minItems": 1,
+              "uniqueItems": true,
+              "description": "Every schema version the verifier accepts — broader than the single version it writes."
+            },
+            "spec": { "$ref": "#/$defs/repoPath" },
+            "schema": { "$ref": "#/$defs/repoPath" },
+            "independent_verifier": { "$ref": "#/$defs/repoPath" }
+          },
+          "required": ["version", "readable_versions", "spec", "schema", "independent_verifier"],
+          "additionalProperties": false
+        },
+        "notification_payload": { "$ref": "#/$defs/contract" }
+      },
+      "required": ["adapter_protocol", "evidence_schema", "notification_payload"],
+      "additionalProperties": false
+    },
+    "adapters": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "$ref": "#/$defs/status" },
+          "adapter_version": { "type": "string", "minLength": 1 },
+          "engine": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 }
+            },
+            "required": ["id", "name"],
+            "additionalProperties": false
+          },
+          "protocol_versions": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^probavi-adapter/(0|[1-9][0-9]*)$" },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "verified": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Engine versions the integration suite actually restores from. Not a supported-version range (capabilities.md §1.3).",
+            "items": {
+              "type": "object",
+              "properties": {
+                "engine_version": { "type": "string", "minLength": 1 },
+                "image": { "type": "string", "minLength": 1 }
+              },
+              "required": ["engine_version", "image"],
+              "additionalProperties": false
+            }
+          },
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "name": { "type": "string", "minLength": 1 },
+                "pitr": { "type": "boolean" }
+              },
+              "required": ["id", "name", "pitr"],
+              "additionalProperties": false
+            }
+          },
+          "pitr": {
+            "type": "boolean",
+            "description": "True when at least one source kind supports point-in-time recovery."
+          },
+          "conformance_verified": { "type": "boolean" },
+          "docs": { "$ref": "#/$defs/nullableRepoPath" }
+        },
+        "required": [
+          "id", "name", "status", "adapter_version", "engine", "protocol_versions",
+          "verified", "sources", "pitr", "conformance_verified", "docs"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "sandbox_providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "#/$defs/id" },
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "$ref": "#/$defs/status" },
+          "params": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "required": { "type": "boolean" },
+                "default": { "type": ["string", "null"] },
+                "doc": { "type": "string", "minLength": 1 }
+              },
+              "required": ["id", "required", "default", "doc"],
+              "additionalProperties": false
+            }
+          },
+          "isolation": {
+            "type": "object",
+            "description": "Containment properties an operator must know before pointing the provider at restored production data.",
+            "properties": {
+              "network_default": { "type": ["string", "null"] },
+              "published_ports": { "type": "boolean" },
+              "storage": { "type": "string", "minLength": 1 },
+              "forced_teardown": { "type": "boolean" },
+              "orphan_sweep": { "type": "string", "minLength": 1 },
+              "external_backstop": { "type": ["string", "null"] }
+            },
+            "required": [
+              "network_default", "published_ports", "storage",
+              "forced_teardown", "orphan_sweep", "external_backstop"
+            ],
+            "additionalProperties": false
+          },
+          "constraints": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "verified_against": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "docs": { "$ref": "#/$defs/nullableRepoPath" }
+        },
+        "required": [
+          "id", "name", "status", "params", "isolation",
+          "constraints", "verified_against", "docs"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "$ref": "#/$defs/status" },
+          "kind": { "enum": ["builtin", "sql"] },
+          "params": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "type": { "enum": ["identifier", "integer", "duration", "string", "scalar"] },
+                "required": { "type": "boolean" },
+                "doc": { "type": "string", "minLength": 1 }
+              },
+              "required": ["id", "type", "required", "doc"],
+              "additionalProperties": false
+            }
+          },
+          "requires": { "type": ["string", "null"] }
+        },
+        "required": ["id", "name", "status", "kind", "params", "requires"],
+        "additionalProperties": false
+      }
+    },
+    "cli": {
+      "type": "object",
+      "properties": {
+        "binary": { "type": "string", "minLength": 1 },
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "$ref": "#/$defs/status" },
+              "summary": { "type": "string", "minLength": 1 },
+              "flags": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "pattern": "^--[a-z][a-z0-9-]*$" },
+                    "required": { "type": "boolean" },
+                    "repeatable": { "type": "boolean" },
+                    "doc": { "type": "string", "minLength": 1 }
+                  },
+                  "required": ["id", "required", "repeatable", "doc"],
+                  "additionalProperties": false
+                }
+              },
+              "positional": { "type": ["string", "null"] },
+              "stdout": { "type": ["string", "null"] },
+              "exit_codes": {
+                "type": "array",
+                "minItems": 1,
+                "description": "The cron/CI contract, taken from the table the binary dispatches from.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "code": { "type": "integer", "minimum": 0, "maximum": 125 },
+                    "meaning": { "type": "string", "minLength": 1 }
+                  },
+                  "required": ["code", "meaning"],
+                  "additionalProperties": false
+                }
+              },
+              "docs": { "$ref": "#/$defs/nullableRepoPath" }
+            },
+            "required": [
+              "id", "name", "status", "summary", "flags",
+              "positional", "stdout", "exit_codes", "docs"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["binary", "commands"],
+      "additionalProperties": false
+    },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "payload_version": { "type": "string", "pattern": "^probavi-notification/(0|[1-9][0-9]*)$" },
+        "event": { "type": "string", "minLength": 1 },
+        "transports": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Shipped delivery mechanisms only. Slack, email, and dead-man's-switch services are recipes on top of the webhook, documentation rather than capabilities.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "$ref": "#/$defs/id" },
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "$ref": "#/$defs/status" },
+              "method": { "type": "string", "minLength": 1 },
+              "content_type": { "type": "string", "minLength": 1 },
+              "event_header": { "type": "string", "minLength": 1 },
+              "signing": {
+                "type": "object",
+                "properties": {
+                  "algorithm": { "type": "string", "minLength": 1 },
+                  "header": { "type": "string", "minLength": 1 },
+                  "optional": { "type": "boolean" }
+                },
+                "required": ["algorithm", "header", "optional"],
+                "additionalProperties": false
+              },
+              "outcome_filter": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "delivery": {
+                "type": "object",
+                "properties": {
+                  "attempts": { "type": "integer", "minimum": 1 },
+                  "attempt_timeout_seconds": { "type": "integer", "minimum": 1 },
+                  "total_budget_seconds": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["attempts", "attempt_timeout_seconds", "total_budget_seconds"],
+                "additionalProperties": false
+              },
+              "docs": { "$ref": "#/$defs/nullableRepoPath" }
+            },
+            "required": [
+              "id", "name", "status", "method", "content_type", "event_header",
+              "signing", "outcome_filter", "delivery", "docs"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["payload_version", "event", "transports"],
+      "additionalProperties": false
+    },
+    "locales": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string", "pattern": "^[a-z]{2,3}$" },
+        "available": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z]{2,3}$" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "scope": { "type": "string", "minLength": 1 },
+        "docs": { "$ref": "#/$defs/nullableRepoPath" }
+      },
+      "required": ["source", "available", "scope", "docs"],
+      "additionalProperties": false
+    },
+    "non_goals": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Normative in the negative: a consumer must never contradict these statements.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_]*$" },
+          "statement": { "type": "string", "minLength": 1 }
+        },
+        "required": ["id", "statement"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "$schema", "_generated", "schema", "project", "contracts", "adapters",
+    "sandbox_providers", "checks", "cli", "notifications", "locales", "non_goals"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "status": {
+      "enum": ["experimental", "beta", "stable"],
+      "description": "Maturity. While project.status is pre-alpha everything is experimental; beta and stable are reserved (capabilities.md §3)."
+    },
+    "repoPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repository-relative path; a trailing slash marks a directory. The generator fails on a path that does not exist, so these are never dead links."
+    },
+    "nullableRepoPath": {
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "contract": {
+      "type": "object",
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "spec": { "$ref": "#/$defs/repoPath" },
+        "schema": { "$ref": "#/$defs/repoPath" }
+      },
+      "required": ["version", "spec", "schema"],
+      "additionalProperties": false
+    }
+  }
+}
