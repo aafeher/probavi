@@ -71,7 +71,8 @@ Commands:
       (docs/adapter-protocol.md §10) against a simulated sandbox — no
       container runtime involved. A new adapter is done when this passes.
       Prints one line per check on stderr and a JSON report on stdout.
-      Exit codes: 0 conformant, 1 one or more checks failed, 3 usage error.
+      Exit codes: 0 conformant, 1 one or more checks failed, 2 the suite
+      could not be run to completion, 3 usage error.
 
   version
       Print the probavi version and the contract versions this build

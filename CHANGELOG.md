@@ -11,6 +11,19 @@ always called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- `probavi adapter conformance` usage text now documents exit code `2`.
+  The command has always returned it when the suite cannot be driven to
+  completion — an adapter that fails to exec, a stdout that cannot be
+  written — but the help text listed only `0`, `1`, and `3`, so a CI
+  pipeline branching on the documented set would have treated a suite
+  that never ran as an unrecognized status. Surfaced while building the
+  CLI contract table for `docs/capabilities.json`, which reads the exit
+  codes from the same table the binary dispatches from. All 23 locale
+  catalogs are updated with it; **the added clause needs a native-speaker
+  review pass before release** (docs/i18n.md §5).
+
 ### Added
 
 - Generated capabilities manifest: `docs/capabilities.json`
