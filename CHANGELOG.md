@@ -11,6 +11,23 @@ always called out explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- The independent evidence verifier has a tagged, pinnable release:
+  `spec/evidence/v0.2.0`. It lives in its own Go module, so it carries its
+  own `spec/evidence/vX.Y.Z` tags and versions independently of the
+  `probavi` binary — until now it had no tags at all, and
+  `@latest` resolved to a pseudo-version of `main`, which meant the one
+  artifact whose whole purpose is independent verification could not be
+  named in an audit. Pin it when the verification itself has to be
+  reproducible:
+
+  ```sh
+  go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@v0.2.0
+  ```
+
+  `@latest` keeps working and stays the recommended default for casual use.
+
 ## [0.2.0] - 2026-08-03
 
 ### Changed

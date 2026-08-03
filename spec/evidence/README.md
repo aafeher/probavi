@@ -42,6 +42,15 @@ Or install it as a standalone tool — no Probavi installation required:
 go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@latest
 ```
 
+This module is versioned and tagged independently of the `probavi` binary,
+with its own `spec/evidence/vX.Y.Z` tags. Pin one when the verification
+itself has to be reproducible — an audit that records *which* verifier
+accepted a log has to be able to name it, and `@latest` moves:
+
+```sh
+go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@v0.2.0
+```
+
 `--key` is repeatable; pass every public key a log may have been signed
 under, so that a log spanning a key rotation verifies end to end.
 
