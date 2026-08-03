@@ -8,10 +8,10 @@
 package registry
 
 import (
-	"github.com/aafeher/probavi/internal/sandbox"
-	"github.com/aafeher/probavi/internal/sandbox/docker"
-	"github.com/aafeher/probavi/internal/sandbox/k8s"
-	"github.com/aafeher/probavi/internal/sandbox/remotehost"
+	"github.com/probavi/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox/docker"
+	"github.com/probavi/probavi/internal/sandbox/k8s"
+	"github.com/probavi/probavi/internal/sandbox/remotehost"
 )
 
 // Descriptors returns every shipped provider's self-description, in

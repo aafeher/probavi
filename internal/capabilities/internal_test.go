@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/cli"
-	"github.com/aafeher/probavi/internal/notify"
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/cli"
+	"github.com/probavi/probavi/internal/notify"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // internal_test.go unit-tests the guards Build relies on. They are what

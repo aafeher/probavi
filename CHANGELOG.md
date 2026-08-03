@@ -61,7 +61,7 @@ always called out explicitly.
   second implementation of the format, written from
   `docs/evidence-schema.md` alone, ships as the dependency-free
   `probavi-evidence-verify` tool, installable on its own with
-  `go install github.com/aafeher/probavi/spec/evidence/cmd/probavi-evidence-verify@latest`.
+  `go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@latest`.
   It lives in a separate Go module, so the toolchain — not convention —
   forbids it importing Probavi's own evidence code. Until now the only
   thing checking the hash chain and the signatures was the code that
@@ -219,5 +219,5 @@ First tagged release. Everything below is new.
 - `probavi version`: prints the binary version and the contract versions
   the build speaks.
 
-[Unreleased]: https://github.com/aafeher/probavi/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/aafeher/probavi/releases/tag/v0.1.0
+[Unreleased]: https://github.com/probavi/probavi/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/probavi/probavi/releases/tag/v0.1.0

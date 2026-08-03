@@ -12,10 +12,10 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/aafeher/probavi/internal/adapter"
-	"github.com/aafeher/probavi/internal/cli"
-	"github.com/aafeher/probavi/internal/evidence"
-	"github.com/aafeher/probavi/internal/i18n"
+	"github.com/probavi/probavi/internal/adapter"
+	"github.com/probavi/probavi/internal/cli"
+	"github.com/probavi/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/i18n"
 )
 
 // Exit codes. Verify verdicts follow evidence-schema.md §9; exitUsage

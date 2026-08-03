@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/capabilities"
+	"github.com/probavi/probavi/internal/capabilities"
 )
 
 const repoRoot = "../../.."

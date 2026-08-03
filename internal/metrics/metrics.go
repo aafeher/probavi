@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/evidence"
 )
 
 // TrendWindow is how many recent restore samples feed the rolling

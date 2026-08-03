@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/aafeher/probavi/internal/adapter"
-	"github.com/aafeher/probavi/internal/cli"
-	"github.com/aafeher/probavi/internal/config"
-	"github.com/aafeher/probavi/internal/evidence"
-	"github.com/aafeher/probavi/internal/i18n"
-	"github.com/aafeher/probavi/internal/notify"
-	"github.com/aafeher/probavi/internal/sandbox"
-	"github.com/aafeher/probavi/internal/sandbox/registry"
+	"github.com/probavi/probavi/internal/adapter"
+	"github.com/probavi/probavi/internal/cli"
+	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/i18n"
+	"github.com/probavi/probavi/internal/notify"
+	"github.com/probavi/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox/registry"
 )
 
 // Build assembles the capabilities document from the repository rooted at

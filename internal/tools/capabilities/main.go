@@ -17,7 +17,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/aafeher/probavi/internal/capabilities"
+	"github.com/probavi/probavi/internal/capabilities"
 )
 
 func main() {

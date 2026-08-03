@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/capabilities"
+	"github.com/probavi/probavi/internal/capabilities"
 )
 
 // TestInRepoAdaptersAreConformant is the Phase 2 exit criterion's other

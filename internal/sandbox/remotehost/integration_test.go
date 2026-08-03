@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // TestRemoteHostLifecycle drives a real target through the full provider

@@ -21,8 +21,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/aafeher/probavi/internal/config"
-	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/evidence"
 )
 
 // Delivery constants (docs/notifications.md §3). Deliberately not

@@ -47,8 +47,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aafeher/probavi/internal/sandbox"
-	"github.com/aafeher/probavi/internal/sandbox/cli"
+	"github.com/probavi/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox/cli"
 )
 
 // EnvTarget names the environment variable selecting the ssh target

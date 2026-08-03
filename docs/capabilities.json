@@ -5,7 +5,7 @@
   "project": {
     "status": "pre-alpha",
     "license": "Apache-2.0",
-    "repository": "https://github.com/aafeher/probavi"
+    "repository": "https://github.com/probavi/probavi"
   },
   "contracts": {
     "adapter_protocol": {

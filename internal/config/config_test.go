@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/i18n"
+	"github.com/probavi/probavi/internal/i18n"
 )
 
 // validYAML is a minimal drill config that must pass validation; invalid

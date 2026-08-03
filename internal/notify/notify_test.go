@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/config"
-	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/evidence"
 )
 
 const configHash = "sha256:9f2a11a6a9e1a76f7e4c62b9b2b0a3f2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6"

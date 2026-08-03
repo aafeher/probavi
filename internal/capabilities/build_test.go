@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/capabilities"
+	"github.com/probavi/probavi/internal/capabilities"
 )
 
 // build_test.go proves the generator refuses to publish a claim it cannot

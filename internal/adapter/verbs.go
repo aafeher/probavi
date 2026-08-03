@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // SandboxVerbs is what this package needs from a sandbox to fulfill

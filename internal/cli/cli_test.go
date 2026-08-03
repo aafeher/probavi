@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/cli"
+	"github.com/probavi/probavi/internal/cli"
 )
 
 // TestResolve covers every way an argument list can meet the table. The

@@ -11,8 +11,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/aafeher/probavi/internal/config"
-	"github.com/aafeher/probavi/internal/evidence"
+	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/evidence"
 )
 
 // OutcomeSkipped is the member outcome for drills that never ran because

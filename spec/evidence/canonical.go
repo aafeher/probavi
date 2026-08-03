@@ -4,7 +4,7 @@
 // It is deliberately a *second* implementation. It was written from
 // docs/evidence-schema.md alone and shares no code with the Probavi core:
 // this is a separate Go module, so the language itself forbids importing
-// github.com/aafeher/probavi/internal/... . When this package and the core
+// github.com/probavi/probavi/internal/... . When this package and the core
 // disagree about a log, either the specification is ambiguous or one of the
 // two is wrong — catching that is the entire point of the package existing.
 //

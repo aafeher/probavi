@@ -22,7 +22,7 @@ import (
 	"io"
 	"os"
 
-	evidence "github.com/aafeher/probavi/spec/evidence"
+	evidence "github.com/probavi/probavi/spec/evidence"
 )
 
 // keyList collects repeated --key flags.

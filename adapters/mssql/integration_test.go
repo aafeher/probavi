@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aafeher/probavi/internal/adapter"
-	"github.com/aafeher/probavi/internal/capabilities"
-	"github.com/aafeher/probavi/internal/sandbox"
-	"github.com/aafeher/probavi/internal/sandbox/docker"
+	"github.com/probavi/probavi/internal/adapter"
+	"github.com/probavi/probavi/internal/capabilities"
+	"github.com/probavi/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox/docker"
 )
 
 const (

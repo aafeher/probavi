@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 func TestExecRunnerReal(t *testing.T) {

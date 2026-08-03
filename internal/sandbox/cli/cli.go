@@ -11,7 +11,7 @@ import (
 	"io"
 	"os/exec"
 
-	"github.com/aafeher/probavi/internal/sandbox"
+	"github.com/probavi/probavi/internal/sandbox"
 )
 
 // Runner abstracts subprocess execution so provider logic is unit-testable

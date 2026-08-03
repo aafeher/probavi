@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/config"
-	"github.com/aafeher/probavi/internal/i18n"
+	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/i18n"
 )
 
 // translatable is the full message set the catalogs are held to: the CLI

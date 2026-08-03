@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aafeher/probavi/internal/sandbox/registry"
+	"github.com/probavi/probavi/internal/sandbox/registry"
 )
 
 // TestDescriptorsAreWellFormed holds every shipped provider to the fields
