@@ -110,9 +110,10 @@ func TestNoVolatileFields(t *testing.T) {
 		}
 	}
 	// The binary's version is deliberately absent: it changes per build,
-	// while the manifest describes the repository.
-	if strings.Contains(out, "0.1.0-dev") {
-		t.Error("rendered document carries the binary version")
+	// while the manifest describes the repository. Matched by shape, not
+	// by the literal of the day, so the guard survives a version bump.
+	if v := devVersionPattern.FindString(out); v != "" {
+		t.Errorf("rendered document carries the binary version: %q", v)
 	}
 	if when := timestampPattern.FindString(out); when != "" {
 		t.Errorf("rendered document carries a timestamp: %q", when)
@@ -123,6 +124,10 @@ func TestNoVolatileFields(t *testing.T) {
 // clock reading would take. It cannot match an image tag such as
 // "2022-latest".
 var timestampPattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}`)
+
+// devVersionPattern matches the binary's development version stamp
+// (`0.2.0-dev`), whatever release it currently trails.
+var devVersionPattern = regexp.MustCompile(`\d+\.\d+\.\d+-dev`)
 
 // TestAdaptersTrackTheRepository proves the adapter list is discovered,
 // not declared: every directory under adapters/ that carries a probe

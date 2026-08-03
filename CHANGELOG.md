@@ -11,6 +11,35 @@ always called out explicitly.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-03
+
+### Changed
+
+- **Breaking — the module path is now `github.com/probavi/probavi`.** The
+  repository moved from `aafeher/probavi` to the `probavi` organisation on
+  2026-08-03. GitHub redirects the old path, so clones and links keep
+  working, but a Go module is identified by what its `go.mod` declares, not
+  by where it is served from: without this change the canonical URL would
+  have been the one address the project could not be installed from. Both
+  modules moved — the core and `spec/evidence`, the independent verifier
+  that lives in its own module so that the toolchain, not discipline,
+  forbids it importing `internal/`. Update imports and install commands:
+
+  ```sh
+  go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@latest
+  ```
+
+  **`v0.1.0` is not installable under the new path and never will be.** Its
+  `go.mod` declares the old module path, and Go checks that a module says
+  what it was asked for, so building `github.com/probavi/probavi@v0.1.0`
+  fails with a path mismatch. Retagging cannot fix it: `proxy.golang.org`
+  and `sum.golang.org` have already recorded that version, and both are
+  immutable by design — re-pointing the tag would replace a clear error
+  with a checksum-mismatch security error. Use
+  `github.com/aafeher/probavi@v0.1.0`, which still resolves and builds, or
+  move to `v0.2.0` under the new path. The `v0.1.0` GitHub release and its
+  binaries are unaffected; only module resolution is.
+
 ### Fixed
 
 - `probavi adapter conformance` usage text now documents exit code `2`.
@@ -21,8 +50,9 @@ always called out explicitly.
   that never ran as an unrecognized status. Surfaced while building the
   CLI contract table for `docs/capabilities.json`, which reads the exit
   codes from the same table the binary dispatches from. All 23 locale
-  catalogs are updated with it; **the added clause needs a native-speaker
-  review pass before release** (docs/i18n.md §5).
+  catalogs carry the new clause. **It shipped without a native-speaker
+  review pass** (docs/i18n.md §5); that review is still owed, and a
+  correction will follow in a later release if one is needed.
 
 ### Added
 
@@ -219,5 +249,6 @@ First tagged release. Everything below is new.
 - `probavi version`: prints the binary version and the contract versions
   the build speaks.
 
-[Unreleased]: https://github.com/probavi/probavi/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/probavi/probavi/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/probavi/probavi/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/probavi/probavi/releases/tag/v0.1.0
