@@ -16,10 +16,9 @@ import (
 	"time"
 
 	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/evidence"
 	"github.com/probavi/probavi/internal/sandbox"
 )
-
-const maxDetailLen = 200
 
 var identPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
@@ -245,11 +244,11 @@ func quoteIdent(name string) (string, error) {
 	return strings.Join(parts, "."), nil
 }
 
-// truncateDetail keeps details inside the evidence limit with room to
-// spare; the byte-precise cap is enforced by the evidence package.
+// truncateDetail keeps details inside the evidence limit. It delegates to
+// the evidence package rather than slicing: details carry engine stderr,
+// which is routinely non-ASCII, and a cut inside a multi-byte rune
+// produces invalid UTF-8 that the record layer rejects — turning a
+// completed drill into one with no evidence at all.
 func truncateDetail(s string) string {
-	if len(s) <= maxDetailLen {
-		return s
-	}
-	return s[:maxDetailLen-3] + "..."
+	return evidence.TruncateLine(s, evidence.MaxDetailBytes)
 }

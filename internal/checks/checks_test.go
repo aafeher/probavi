@@ -6,8 +6,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/probavi/probavi/internal/config"
+	"github.com/probavi/probavi/internal/evidence"
 	"github.com/probavi/probavi/internal/sandbox"
 )
 
@@ -371,11 +373,25 @@ func TestQuoteIdent(t *testing.T) {
 }
 
 func TestDetailTruncation(t *testing.T) {
-	long := strings.Repeat("e", 500)
-	exec := &fakeExec{t: t, respond: queryFailure(long)}
-	res := runSingle(t, config.Check{SQL: "SELECT 1", Expect: config.ScalarFromString("1")}, exec)
-	if len(res.Detail) > maxDetailLen || !strings.HasSuffix(res.Detail, "...") {
-		t.Errorf("detail length = %d (%q...), want truncated to %d", len(res.Detail), res.Detail[:40], maxDetailLen)
+	// Engine stderr is routinely non-ASCII (localized messages, accented
+	// identifiers). Truncating such a detail by byte offset splits a rune,
+	// and the invalid UTF-8 makes the evidence record unwritable — a
+	// completed drill that leaves no proof. Every stride is exercised so
+	// that no cut position can regress.
+	for _, filler := range []string{"e", "é", "€", "𝄞"} {
+		t.Run(filler, func(t *testing.T) {
+			long := strings.Repeat(filler, 500)
+			exec := &fakeExec{t: t, respond: queryFailure(long)}
+			res := runSingle(t, config.Check{SQL: "SELECT 1", Expect: config.ScalarFromString("1")}, exec)
+			switch {
+			case len(res.Detail) > evidence.MaxDetailBytes:
+				t.Errorf("detail is %d bytes, want at most %d", len(res.Detail), evidence.MaxDetailBytes)
+			case !strings.HasSuffix(res.Detail, "..."):
+				t.Errorf("detail %q is not marked as truncated", res.Detail)
+			case !utf8.ValidString(res.Detail):
+				t.Errorf("detail is not valid UTF-8 — the evidence record would be rejected")
+			}
+		})
 	}
 }
 

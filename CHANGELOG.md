@@ -55,6 +55,27 @@ always called out explicitly.
 
 ### Fixed
 
+- Non-ASCII failure text could make a completed drill leave **no evidence
+  record**. Two producers of record fields measured in characters what the
+  record layer measures in bytes, or cut a string without regard for
+  encoding:
+
+  - `core.sanitizeMessage` capped `error.message` at 500 *runes* against a
+    512-*byte* limit, so an adapter reporting an engine error in an
+    accented language — 400 characters, 800 bytes — was rejected;
+  - `checks.truncateDetail` sliced `checks[].detail` at a byte offset,
+    splitting a rune whenever engine stderr crossed the cap with non-ASCII
+    text, and the invalid UTF-8 was rejected.
+
+  Either one meant exit 5 after a successful restore. Both now use
+  `evidence.TruncateLine`, which truncates on byte length at a rune
+  boundary, alongside the exported `MaxDetailBytes` / `MaxErrorMessageBytes`
+  caps — the mismatch between a producer's private constant and the
+  schema's real limit was the bug, so the limits now have one home. The
+  helper is swept across every budget and every UTF-8 stride, and a
+  regression test drives a full drill with non-ASCII text through the real
+  store.
+
 - The README's status paragraph said "Released as **v0.1.0**" after
   `0.2.0` had shipped, while the install note two sections below already
   explained why `v0.2.0` is the version to use. The landing page of a
