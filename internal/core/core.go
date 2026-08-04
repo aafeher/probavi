@@ -16,6 +16,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/probavi/probavi/internal/adapter"
@@ -394,16 +395,18 @@ func msSince(start, now time.Time) *int64 {
 
 // sanitizeMessage keeps failure text single-line and within the evidence
 // limit; quotes are already avoided by the protocol layers.
+//
+// The cap is measured in bytes by the record layer, so it must be applied
+// in bytes here. Counting runes instead let 400 characters of ordinary
+// accented text — an adapter reporting an engine error in its own language
+// — exceed a 512-byte limit and make the record unwritable, losing the
+// evidence for a drill that had already run.
 func sanitizeMessage(s string) string {
-	out := make([]rune, 0, len(s))
-	for _, r := range s {
+	out := strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' {
-			r = ' '
+			return ' '
 		}
-		out = append(out, r)
-	}
-	if len(out) > 500 {
-		out = append(out[:497], []rune("...")...)
-	}
-	return string(out)
+		return r
+	}, s)
+	return evidence.TruncateLine(out, evidence.MaxErrorMessageBytes)
 }
