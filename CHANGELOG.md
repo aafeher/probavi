@@ -28,6 +28,21 @@ always called out explicitly.
 
   `@latest` keeps working and stays the recommended default for casual use.
 
+### Fixed
+
+- The open-core boundary in `ROADMAP.md` said "proving a **single drill**
+  stays free forever". It was written on 2026-07-31, before game-days
+  existed, and read as if `probavi gameday` — multi-database,
+  dependency-ordered orchestration — were part of the commercial
+  organisational layer. It never was: game-days shipped on 2026-08-02 as
+  Apache-2.0 core and are a full free feature with no member limit. The
+  boundary is now stated by what stays free rather than by scale, the
+  README's license enumeration names game-days (plus notifications and
+  metrics) explicitly, `docs/gameday.md` says it where a game-day user
+  reads it, and `AGENTS.md` §6 declares the commercial list exhaustive so
+  the ambiguity cannot come back. No licensing change — a wording
+  correction to match what has always shipped.
+
 ## [0.2.0] - 2026-08-03
 
 ### Changed

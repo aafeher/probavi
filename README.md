@@ -280,4 +280,4 @@ Probavi is developed AI-assisted with human review. The guarantees do not rest o
 
 ## License
 
-[Apache-2.0](LICENSE). Probavi follows an open-core model: everything in this repository — the CLI, adapters, evidence chain, and verifier — is and stays free software. Planned organisational features (fleet dashboard, audit report exports) will be offered commercially, built on top of this core. The evidence format and the verifier will always remain freely available: proofs you can only check for a fee would not be proofs.
+[Apache-2.0](LICENSE). Probavi follows an open-core model: everything in this repository — the CLI, adapters, sandbox providers, checks, DR game-days, evidence chain, notifications, metrics, and verifier — is and stays free software. Planned organisational features (fleet dashboard, audit report exports) will be offered commercially, built on top of this core. The evidence format and the verifier will always remain freely available: proofs you can only check for a fee would not be proofs.
