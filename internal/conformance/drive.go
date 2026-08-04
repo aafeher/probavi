@@ -127,13 +127,19 @@ func drive(ctx context.Context, adapterPath, requestID string, spec driveSpec) (
 	defer stop()
 
 	start := time.Now()
-	if _, err := io.WriteString(stdin, spec.request+"\n"); err != nil {
+	if _, err := io.WriteString(stdin, spec.request+"\n"); err != nil && !closedPipe(err) {
 		kill()
 		return nil, errors.Join(fmt.Errorf("write request: %w", err), exitless(cmd.Wait()))
 	}
 
 	readLoop(res, stdin, stdout, cmd, requestID, spec, killTimer, start)
+	return finish(res, stdin, cmd, &killed, &killFailed)
+}
 
+// finish reaps the adapter and separates the two kinds of bad news: a
+// harness-side failure, which aborts the suite, and anything the adapter
+// itself did, which belongs in the result as a verdict.
+func finish(res *opResult, stdin io.WriteCloser, cmd *exec.Cmd, killed, killFailed *atomic.Bool) (*opResult, error) {
 	cerr := stdin.Close()
 	werr := cmd.Wait()
 	res.killed = killed.Load()
@@ -197,6 +203,20 @@ func readLoop(res *opResult, stdin io.WriteCloser, stdout io.Reader, cmd *exec.C
 	if res.final == nil {
 		res.wall = time.Since(start)
 	}
+}
+
+// closedPipe reports a write failure that means the adapter closed its end
+// of stdin — normally because it had already exited, racing our write. That
+// is no verdict by itself: §2.1 lets an adapter stop the moment it sees EOF,
+// and §2.3 makes "exited without a final response" a crash. What actually
+// happened therefore comes from the read loop and the exit status, exactly
+// as when the write lands before the exit. Treating the write error as a
+// harness failure instead would abort the whole suite — telling an adapter
+// author that the tool broke, for behaviour their adapter got right.
+func closedPipe(err error) bool {
+	return errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, os.ErrClosed)
 }
 
 // handleLine classifies one stdout line; it reports false when the loop

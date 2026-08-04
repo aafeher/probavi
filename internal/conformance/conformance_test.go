@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -318,5 +320,51 @@ func TestIsRFC3339(t *testing.T) {
 		if got := isRFC3339(tt.in); got != tt.want {
 			t.Errorf("isRFC3339(%q) = %v, want %v", tt.in, got, tt.want)
 		}
+	}
+}
+
+// TestDriveToleratesClosedStdin covers the race that made the suite fail
+// with a harness error instead of a verdict: the adapter exits before the
+// request lands, our write gets EPIPE, and there is nothing wrong with the
+// adapter that the read loop and the exit status cannot describe. The
+// request is deliberately larger than a pipe buffer so the write cannot be
+// absorbed and the failure is the one under test rather than a coin flip.
+func TestDriveToleratesClosedStdin(t *testing.T) {
+	t.Setenv("PROBAVI_FAKE_ADAPTER", "exit-before-read")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("executable: %v", err)
+	}
+	huge := `{"protocol":"` + protocolVersion + `","request_id":"r1","op":"probe","payload":{"pad":"` +
+		strings.Repeat("x", 512*1024) + `"}}`
+
+	res, err := drive(context.Background(), self, "r1", driveSpec{request: huge})
+	if err != nil {
+		t.Fatalf("a closed stdin is not a harness error: %v", err)
+	}
+	if res.final != nil {
+		t.Errorf("final = %+v, want none — the adapter never answered", res.final)
+	}
+}
+
+func TestClosedPipe(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"EPIPE", syscall.EPIPE, true},
+		{"wrapped EPIPE", fmt.Errorf("write: %w", syscall.EPIPE), true},
+		{"closed pipe", io.ErrClosedPipe, true},
+		{"closed file", os.ErrClosed, true},
+		{"unrelated", errors.New("disk on fire"), false},
+		{"nil", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := closedPipe(tt.err); got != tt.want {
+				t.Errorf("closedPipe(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }

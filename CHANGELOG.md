@@ -77,6 +77,21 @@ always called out explicitly.
 
 ### Fixed
 
+- `probavi adapter conformance` could abort with a harness error instead of
+  reporting verdicts. The driver treated **any** stdin write failure as a
+  suite-side failure, so an adapter that exited before the request landed —
+  a cancelled run, an operator's Ctrl-C, or an adapter that answers and
+  exits quickly — produced `write request: broken pipe` and exit 2 ("the
+  suite could not be run to completion"). An adapter author saw the tool
+  break for behaviour their adapter got right.
+
+  A closed stdin is now no verdict by itself, which is what the core's own
+  protocol client has always done: §2.1 lets an adapter stop the moment it
+  sees EOF, and §2.3 makes "exited without a final response" a crash, so
+  the read loop and the exit status decide what happened. `internal/conformance`
+  is deliberately an independent implementation of the protocol, so it gets
+  its own rule rather than a shared helper — the divergence CI surfaced is
+  exactly what that independence is for.
 - **Security:** the k8s and remotehost providers no longer put per-command
   environment values on the command line. Both passed `env NAME=value` to
   the command they ran, so a database password a check needs was readable
