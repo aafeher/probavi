@@ -105,6 +105,23 @@ always called out explicitly.
   while Go's `time.RFC3339` layout rejects them — an adapter whose output
   validates against the published schema must not fail certification.
 
+- Probavi could sign records that fail Probavi's own published schema.
+  `docs/schemas/evidence/record.json` constrains `error.code` to fourteen
+  values; the core copied whatever code the adapter returned, and
+  `Record.Validate` only checked that it was non-empty. An adapter
+  answering `{"code":"banana_peel"}` produced a chain-valid, signed record
+  that `probavi evidence verify` reports VALID while a schema check reports
+  INVALID — the one contradiction a trust product cannot ship.
+
+  The vocabulary now has a single home in `internal/evidence` (thirteen
+  codes from the adapter protocol's §5 registry plus schema-defined
+  `check_failed`), the core normalizes an unregistered code to `internal`
+  and keeps the original in the message, and a schema test pins the Go list
+  to the published enum in both directions so they cannot drift.
+
+  It is normalization rather than rejection on purpose: refusing the record
+  would trade a wrong code for no evidence at all, which is the worse
+  failure.
 - Non-ASCII failure text could make a completed drill leave **no evidence
   record**. Two producers of record fields measured in characters what the
   record layer measures in bytes, or cut a string without regard for

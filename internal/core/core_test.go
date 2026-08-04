@@ -512,6 +512,52 @@ func TestHostIDFallback(t *testing.T) {
 	}
 }
 
+// TestUnregisteredErrorCodeIsNormalized covers the vocabulary rule: an
+// adapter chooses its own error code, and a record carrying one outside
+// the published enum would verify as VALID while failing the schema every
+// consumer validates against. The code becomes internal; the original
+// survives in the message, so nothing is lost for whoever debugs it.
+func TestUnregisteredErrorCodeIsNormalized(t *testing.T) {
+	tests := []struct {
+		name        string
+		code        string
+		wantCode    string
+		wantOutcome evidence.Outcome
+		wantInMsg   string
+	}{
+		{"registry code passes through", "restore_failed", "restore_failed", evidence.OutcomeFail, "disk full"},
+		{"schema-only code passes through", "check_failed", "check_failed", evidence.OutcomeFail, "disk full"},
+		{"invented code becomes internal", "banana_peel", "internal", evidence.OutcomeError, `"banana_peel"`},
+		{"gameday summary code is not a record code", "evidence_lost", "internal", evidence.OutcomeError, `"evidence_lost"`},
+		{"empty code becomes internal", "", "internal", evidence.OutcomeError, `""`},
+		{"case matters", "INTERNAL", "internal", evidence.OutcomeError, `"INTERNAL"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fa := &fakeAdapter{probe: testProbe(),
+				provErr: &adapter.Error{Code: tt.code, Message: "disk full"}}
+			d, _ := newDrill(t, fa, &fakeProvider{sbx: &fakeSandbox{execValue: "1"}})
+
+			rec, err := d.Run(context.Background())
+			if err != nil {
+				t.Fatalf("a drill that ran must leave a record: %v", err)
+			}
+			if rec.Error.Code != tt.wantCode {
+				t.Errorf("error.code = %q, want %q", rec.Error.Code, tt.wantCode)
+			}
+			if rec.Outcome != tt.wantOutcome {
+				t.Errorf("outcome = %q, want %q", rec.Outcome, tt.wantOutcome)
+			}
+			if !strings.Contains(rec.Error.Message, tt.wantInMsg) {
+				t.Errorf("message %q does not carry %s", rec.Error.Message, tt.wantInMsg)
+			}
+			if !evidence.IsErrorCode(rec.Error.Code) {
+				t.Errorf("signed record carries %q, which is outside the published vocabulary", rec.Error.Code)
+			}
+		})
+	}
+}
+
 // TestNonASCIIFailureTextStillLeavesARecord is the regression test for the
 // class of bug where a drill ran and then lost its proof. Both strings are
 // non-ASCII and longer than their evidence caps: an adapter reporting an
