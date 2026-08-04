@@ -28,6 +28,14 @@ always called out explicitly.
 
   `@latest` keeps working and stays the recommended default for casual use.
 
+### Fixed
+
+- The README's status paragraph said "Released as **v0.1.0**" after
+  `0.2.0` had shipped, while the install note two sections below already
+  explained why `v0.2.0` is the version to use. The landing page of a
+  trust product understating its own released version is exactly the
+  drift the capabilities manifest exists to prevent, one surface up.
+
 ## [0.2.0] - 2026-08-03
 
 ### Changed
@@ -58,6 +66,12 @@ always called out explicitly.
   binaries are unaffected; only module resolution is.
 
 ### Fixed
+
+- The README's status paragraph said "Released as **v0.1.0**" after
+  `0.2.0` had shipped, while the install note two sections below already
+  explained why `v0.2.0` is the version to use. The landing page of a
+  trust product understating its own released version is exactly the
+  drift the capabilities manifest exists to prevent, one surface up.
 
 - `probavi adapter conformance` usage text now documents exit code `2`.
   The command has always returned it when the suite cannot be driven to
