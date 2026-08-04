@@ -77,6 +77,34 @@ always called out explicitly.
 
 ### Fixed
 
+- A drill that restored a backup successfully could end with **no evidence
+  record at all** — exit 5, the failure mode `internal/core`'s package
+  comment calls the highest-severity bug — because values an adapter
+  reports were copied into the record without being checked against what
+  the record accepts. `evidence.Record.Validate` rejects; it does not
+  repair. Three reachable inputs did it:
+
+  - `created_at` at second precision (valid RFC 3339, and the form the
+    protocol's own example showed) — rejected as "not RFC 3339 UTC with
+    millisecond precision",
+  - a NaN phase timing — the `< 0` guard is false for NaN, and
+    `int64(math.Round(NaN*1000))` is the most negative int64 there is, so
+    the record was rejected for a negative duration,
+  - a negative `size_bytes`.
+
+  `validateProvisionResult` now holds the provision response to everything
+  the record will demand of it: `created_at` is parsed and normalized to
+  the schema's UTC millisecond form (truncated, never rounded), timings
+  must be finite, non-negative and representable, `size_bytes`
+  non-negative. A violation is an `adapter_crash` verdict **with** a
+  signed record, which is what the boundary is for.
+
+  Also accepted, here and in `probavi adapter conformance`: RFC 3339's
+  lowercase `t`/`z` designators, which
+  `docs/schemas/adapter/provision-response.json` has always declared valid
+  while Go's `time.RFC3339` layout rejects them — an adapter whose output
+  validates against the published schema must not fail certification.
+
 - Probavi could sign records that fail Probavi's own published schema.
   `docs/schemas/evidence/record.json` constrains `error.code` to fourteen
   values; the core copied whatever code the adapter returned, and

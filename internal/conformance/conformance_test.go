@@ -294,3 +294,29 @@ func tempCounterPath(t *testing.T) string {
 	}
 	return f.Name()
 }
+
+// TestIsRFC3339 pins the acceptance set of the created_at check to RFC
+// 3339 itself rather than to Go's narrower time.RFC3339 layout: the
+// published provision-response schema declares lowercase designators
+// valid, so an adapter that validates against it must pass this suite.
+func TestIsRFC3339(t *testing.T) {
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"2026-07-30T01:58:02Z", true},
+		{"2026-07-30T01:58:02.000Z", true},
+		{"2026-07-30T01:58:02.789999999Z", true},
+		{"2026-07-30t01:58:02z", true},
+		{"2026-07-30T03:58:02+02:00", true},
+		{"2026-07-30", false},
+		{"2026-07-30T01:58:02", false},
+		{"yesterday", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isRFC3339(tt.in); got != tt.want {
+			t.Errorf("isRFC3339(%q) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
