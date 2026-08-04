@@ -18,6 +18,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/probavi/probavi/internal/adapter"
 	"github.com/probavi/probavi/internal/checks"
@@ -85,11 +86,83 @@ func (d *Drill) Run(ctx context.Context) (*evidence.Record, error) {
 
 	rec.Timings.Total = msSince(start, d.Now())
 	rec.TS = d.Now().UTC().Format(evidence.TimestampFormat)
-	if err := d.Store.Append(rec); err != nil {
-		return rec, fmt.Errorf("append evidence record (a drill ran but left no evidence — highest severity): %w", err)
+	err := d.Store.Append(rec)
+	if err == nil {
+		d.Logger.Info("evidence record appended", "seq", rec.Seq, "outcome", rec.Outcome)
+		return rec, nil
 	}
-	d.Logger.Info("evidence record appended", "seq", rec.Seq, "outcome", rec.Outcome)
-	return rec, nil
+	if degraded, ok := d.appendDegraded(rec, err); ok {
+		return degraded, nil
+	}
+	return rec, fmt.Errorf("append evidence record (a drill ran but left no evidence — highest severity): %w", err)
+}
+
+// rejectedByShape reports whether the store refused a record because of
+// what it contains rather than because writing failed. Only then is a
+// second attempt worth making: an I/O failure poisons the store, and a
+// retry would fail identically.
+func rejectedByShape(err error) bool {
+	return errors.Is(err, evidence.ErrInvalidRecord) ||
+		errors.Is(err, evidence.ErrRecordTooLarge) ||
+		errors.Is(err, evidence.ErrNotInteger)
+}
+
+// appendDegraded is the last line of defence behind evidence-schema.md §7:
+// a drill that ran must leave a record. When the composed record is
+// unrepresentable, the alternative to a degraded record is silence — and a
+// drill that vanishes from the log is indistinguishable from one that was
+// never scheduled, which is exactly the gap an attacker or an unlucky
+// operator would want.
+//
+// The replacement carries only values the core itself produced, so nothing
+// an adapter or a database said can make it fail in turn, and it never
+// claims a verdict: the outcome is error, because a drill whose result
+// could not be represented did not reach a recordable one.
+func (d *Drill) appendDegraded(rejected *evidence.Record, cause error) (*evidence.Record, bool) {
+	if !rejectedByShape(cause) {
+		return nil, false
+	}
+	cfg := d.Config
+	degraded := &evidence.Record{
+		Schema: evidence.SchemaID,
+		TS:     d.Now().UTC().Format(evidence.TimestampFormat),
+		Drill: evidence.Drill{
+			Name:       safeText(cfg.Target.Name, "unknown-drill"),
+			ConfigHash: cfg.Hash,
+			PITRTarget: rejected.Drill.PITRTarget,
+		},
+		Backup:  evidence.Backup{Kind: safeText(cfg.Target.Source.Kind, "unknown")},
+		Adapter: evidence.Adapter{Name: safeText(cfg.Target.Adapter, "unknown"), Protocol: adapter.ProtocolVersion},
+		// Sandbox params are operator data copied verbatim and are the most
+		// likely reason a record is unrepresentable; a degraded record drops
+		// them rather than risking a second rejection for the same cause.
+		Sandbox: evidence.Sandbox{
+			Provider: safeText(cfg.Sandbox.Provider, "unknown"),
+			Params:   map[string]string{},
+		},
+		Checks:  []evidence.Check{},
+		Timings: evidence.Timings{Total: rejected.Timings.Total},
+		Outcome: evidence.OutcomeError,
+		Error: &evidence.DrillError{
+			Code: "internal",
+			Message: sanitizeMessage(fmt.Sprintf(
+				"evidence record replaced: the composed record was rejected (%v); the drill reached outcome %q",
+				cause, rejected.Outcome)),
+		},
+		Env: evidence.Env{
+			ProbaviVersion: safeText(d.Version, "unknown"),
+			OS:             runtime.GOOS,
+			Arch:           runtime.GOARCH,
+			HostID:         d.hostID(),
+		},
+	}
+	if err := d.Store.Append(degraded); err != nil {
+		d.Logger.Error("degraded evidence record also rejected", "err", err)
+		return nil, false
+	}
+	d.Logger.Error("composed evidence record was rejected; a degraded record was written instead — this is a bug, please report it",
+		"seq", degraded.Seq, "rejected_outcome", rejected.Outcome, "cause", cause)
+	return degraded, true
 }
 
 func (d *Drill) defaults() {
@@ -405,6 +478,17 @@ func secondsToMS(s float64) *int64 {
 func msSince(start, now time.Time) *int64 {
 	ms := now.Sub(start).Milliseconds()
 	return &ms
+}
+
+// safeText returns s when it can appear in a record as-is, and the given
+// substitute otherwise. It exists for the degraded record only: that
+// record's whole purpose is to be constructible when the normal one was
+// not, so every string it carries has to be checked rather than assumed.
+func safeText(s, substitute string) string {
+	if s == "" || !utf8.ValidString(s) || strings.ContainsAny(s, "\r\n") || len(s) > 256 {
+		return substitute
+	}
+	return s
 }
 
 // sanitizeMessage keeps failure text single-line and within the evidence

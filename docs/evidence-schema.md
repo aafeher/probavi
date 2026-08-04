@@ -235,6 +235,33 @@ reporting: `fail` is a recoverability red flag; `error` is an operational
 red flag; both trends matter, and conflating them would poison the audit
 story.
 
+### 7.1 Degraded records
+
+A record this schema cannot represent must not become silence. If the core
+composes a record the store refuses on shape grounds — an unrepresentable
+value, an oversized record — it appends a **degraded record** in its place
+rather than ending the drill with nothing written.
+
+A degraded record carries only what the core itself produced: the drill
+identity (`drill.name`, `drill.config_hash`, `drill.pitr_target`), the
+environment fingerprint, `timings_ms.total`, `outcome: error` and
+`error.code: internal` with a message naming both the rejection and the
+outcome the drill had reached. Everything supplied by an adapter or copied
+from the drill configuration — backup identity, sandbox parameters,
+checks, per-phase timings — is dropped: one of those values is why the
+record was refused.
+
+It uses no new fields and no new serialization; a verifier needs no
+knowledge of it. A reader recognizes one by its message together with
+`outcome: error`, `checks: []`, empty `sandbox.params` and null per-phase
+timings.
+
+A degraded record is a bug report, not a verdict. It states that a drill
+ran and that its result could not be stored — strictly more than the log
+would otherwise contain, and strictly less than a proof. It is always
+preferable to a lost record and never preferable to a correct one; the
+core logs its appearance at error level.
+
 ## 8. Redaction rules
 
 A record must be shareable with an external auditor as-is. The following
@@ -366,6 +393,13 @@ notes are collected in `spec/evidence/README.md`.
 
 ## Changelog
 
+- Editorial (2026-08-04, no format change): §7.1 added, specifying the
+  degraded record the core appends when the composed one is refused on
+  shape grounds. It uses only fields this schema already defines — no new
+  field, no serialization rule, nothing a verifier must learn — and closes
+  the one path by which the §7 rule ("every started drill MUST end in
+  exactly one appended, signed record") could be violated without a bug in
+  the store itself.
 - Editorial (2026-08-04, no format change): the `backup.created_at` row of
   §3 records where the value comes from and how it is derived — the
   adapter may report any RFC 3339 precision or offset, and the core

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,6 +107,18 @@ func (f *fakeProvider) SweepOrphans(context.Context) ([]string, error) {
 type failingStore struct{ err error }
 
 func (s failingStore) Append(*evidence.Record) error { return s.err }
+
+// countingStore fails every append and counts the attempts, so tests can
+// tell "the core tried once" from "the core tried to rescue the record".
+type countingStore struct {
+	err   error
+	calls int
+}
+
+func (s *countingStore) Append(*evidence.Record) error {
+	s.calls++
+	return s.err
+}
 
 // --- fixtures ----------------------------------------------------------------
 
@@ -638,5 +651,101 @@ func TestSanitizeMessage(t *testing.T) {
 		if !utf8.ValidString(got) {
 			t.Errorf("%q filler: result is not valid UTF-8", filler)
 		}
+	}
+}
+
+// TestDegradedRecordReplacesAnUnrepresentableOne exercises the §7 backstop
+// end to end against the real store: the adapter reports a created_at the
+// evidence schema cannot hold, the composed record is refused, and the
+// drill still leaves a signed, verifiable record instead of vanishing from
+// the log.
+func TestDegradedRecordReplacesAnUnrepresentableOne(t *testing.T) {
+	created := "2026-07-30T01:58:02Z" // valid RFC 3339, but not millisecond UTC
+	prov := testProvision()
+	prov.SourceIdentity.CreatedAt = &created
+	fa := &fakeAdapter{probe: testProbe(), provRes: prov, healthy: true}
+	d, logPath := newDrill(t, fa, &fakeProvider{sbx: &fakeSandbox{execValue: "1"}})
+
+	rec, err := d.Run(context.Background())
+	if err != nil {
+		t.Fatalf("a drill that ran must leave a record: %v", err)
+	}
+	if rec.Outcome != evidence.OutcomeError || rec.Error == nil || rec.Error.Code != "internal" {
+		t.Fatalf("degraded record = outcome %q error %+v, want error/internal", rec.Outcome, rec.Error)
+	}
+	// The message must say what was lost, or the record is a mystery.
+	for _, want := range []string{"replaced", "created_at", `"pass"`} {
+		if !strings.Contains(rec.Error.Message, want) {
+			t.Errorf("message %q does not mention %s", rec.Error.Message, want)
+		}
+	}
+	// Identity the operator needs to find the drill survives; adapter- and
+	// operator-supplied payload does not.
+	if rec.Drill.Name != "prod-orders-db" || rec.Drill.ConfigHash != d.Config.Hash {
+		t.Errorf("degraded record lost its identity: %+v", rec.Drill)
+	}
+	if len(rec.Sandbox.Params) != 0 || len(rec.Checks) != 0 || rec.Backup.Checksum != nil {
+		t.Errorf("degraded record kept payload it should have dropped: %+v", rec)
+	}
+	if rec.Seq != 1 || rec.Sig == nil {
+		t.Errorf("degraded record is not chained and signed: seq=%d sig=%v", rec.Seq, rec.Sig)
+	}
+	assertLogVerifies(t, logPath)
+}
+
+// TestDegradedRecordNotAttemptedOnWriteFailure keeps the backstop narrow: a
+// store that cannot write is not a record the core can fix by rewriting it,
+// and a second attempt would only bury the real error.
+func TestDegradedRecordNotAttemptedOnWriteFailure(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+	d, _ := newDrill(t, fa, &fakeProvider{sbx: &fakeSandbox{execValue: "1"}})
+	counting := &countingStore{err: errors.New("disk full")}
+	d.Store = counting
+
+	if _, err := d.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "left no evidence") {
+		t.Errorf("err = %v — a lost record must surface", err)
+	}
+	if counting.calls != 1 {
+		t.Errorf("Append called %d times, want 1: an I/O failure must not be retried", counting.calls)
+	}
+}
+
+// TestDegradedRecordFailureStillSurfaces covers the case where even the
+// degraded record cannot be stored: the original error must reach the
+// caller rather than being swallowed by the rescue attempt.
+func TestDegradedRecordFailureStillSurfaces(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
+	d, _ := newDrill(t, fa, &fakeProvider{sbx: &fakeSandbox{execValue: "1"}})
+	counting := &countingStore{err: fmt.Errorf("%w: nope", evidence.ErrInvalidRecord)}
+	d.Store = counting
+
+	if _, err := d.Run(context.Background()); err == nil || !strings.Contains(err.Error(), "left no evidence") {
+		t.Errorf("err = %v — a lost record must surface", err)
+	}
+	if counting.calls != 2 {
+		t.Errorf("Append called %d times, want 2: one composed, one degraded", counting.calls)
+	}
+}
+
+func TestSafeText(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"usable value survives", "prod-orders-db", "prod-orders-db"},
+		{"empty is substituted", "", "sub"},
+		{"invalid utf8 is substituted", "bad\xff", "sub"},
+		{"newline is substituted", "two\nlines", "sub"},
+		{"carriage return is substituted", "two\rlines", "sub"},
+		{"over-long is substituted", strings.Repeat("x", 257), "sub"},
+		{"at the limit survives", strings.Repeat("x", 256), strings.Repeat("x", 256)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := safeText(tt.in, "sub"); got != tt.want {
+				t.Errorf("safeText(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
