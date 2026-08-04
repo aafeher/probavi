@@ -44,6 +44,9 @@ func Open(path string, signer *Signer, logger *slog.Logger) (*Store, error) {
 	if err != nil {
 		return nil, errors.Join(fmt.Errorf("open evidence log: %w", err), lock.Close())
 	}
+	if err := syncDir(path); err != nil {
+		return nil, errors.Join(err, f.Close(), lock.Close())
+	}
 	st := &Store{f: f, lock: lock, signer: signer, logger: logger}
 	if err := st.resume(); err != nil {
 		return nil, errors.Join(err, f.Close(), lock.Close())
@@ -176,6 +179,34 @@ func (s *Store) closeTornTail() error {
 	s.logger.Warn("evidence log has a torn tail (crash mid-write); closing the fragment", "path", s.f.Name())
 	if _, err := s.f.Write([]byte("\n")); err != nil {
 		return fmt.Errorf("close torn tail: %w", err)
+	}
+	return nil
+}
+
+// syncDir flushes the directory that holds the log, once, at open.
+//
+// Appending fsyncs the file, which promises its bytes reached the disk —
+// but the name pointing at those bytes lives in the parent directory, and
+// on a new log that entry may still be in cache. A crash there loses the
+// whole file, fsynced record and all, which for an append-only evidence
+// log means losing the proof that a drill ran at all.
+//
+// EINVAL means the filesystem does not support syncing a directory. That
+// is not a reason to refuse to run a drill, so it is the one error passed
+// over; anything else is a durability guarantee this store cannot make and
+// says so rather than pretending.
+func syncDir(path string) error {
+	d, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("open evidence log directory: %w", err)
+	}
+	serr := d.Sync()
+	cerr := d.Close()
+	if serr != nil && !errors.Is(serr, syscall.EINVAL) {
+		return errors.Join(fmt.Errorf("sync evidence log directory: %w", serr), cerr)
+	}
+	if cerr != nil {
+		return fmt.Errorf("close evidence log directory: %w", cerr)
 	}
 	return nil
 }
