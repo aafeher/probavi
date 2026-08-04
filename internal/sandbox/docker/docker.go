@@ -104,9 +104,10 @@ type Provider struct {
 	awaitInterval time.Duration
 	awaitCap      time.Duration
 
-	// alive reports whether a sandbox's creating process still runs. Injected
-	// so the sweep's decision can be tested without spawning processes.
-	alive func(pid int) bool
+	// alive reports whether the process a sandbox's owner id names still
+	// runs. Injected so the sweep's decision can be tested without spawning
+	// processes.
+	alive func(ownerID string) bool
 }
 
 // New returns a Provider shelling out to the "docker" binary.
@@ -122,7 +123,7 @@ func New(logger *slog.Logger) *Provider {
 		hostID:        sandbox.HostID(),
 		awaitInterval: awaitInterval,
 		awaitCap:      maxAwaitUptime,
-		alive:         sandbox.ProcessAlive,
+		alive:         sandbox.OwnerAlive,
 	}
 }
 
@@ -216,7 +217,7 @@ func (p *Provider) isOrphan(ctx context.Context, id string) (bool, error) {
 		}
 		return false, fmt.Errorf("inspect %s: docker inspect exited %d: %s", id, exit, firstLine(stderr))
 	}
-	host, pidLabel, found := strings.Cut(strings.TrimSpace(string(stdout)), "|")
+	host, ownerLabel, found := strings.Cut(strings.TrimSpace(string(stdout)), "|")
 	if !found {
 		// The format always emits the separator; anything else means the
 		// labels are unreadable — ownership metadata is gone.
@@ -225,11 +226,7 @@ func (p *Provider) isOrphan(ctx context.Context, id string) (bool, error) {
 	if host != "" && host != p.hostID {
 		return false, nil
 	}
-	pid, err := strconv.Atoi(pidLabel)
-	if err != nil || pid <= 0 {
-		return true, nil
-	}
-	return !p.alive(pid), nil
+	return !p.alive(ownerLabel), nil
 }
 
 // ID returns the container id.
@@ -368,7 +365,7 @@ func (p *Provider) runArgs(d sandbox.Descriptor, params map[string]string) ([]st
 		"run", "-d",
 		"--name", "probavi-sbx-" + randomSuffix(),
 		"--label", LabelSandbox + "=1",
-		"--label", labelPID + "=" + strconv.Itoa(p.pid),
+		"--label", labelPID + "=" + sandbox.OwnerID(p.pid),
 		"--label", labelHost + "=" + p.hostID,
 		"--network", network,
 	}

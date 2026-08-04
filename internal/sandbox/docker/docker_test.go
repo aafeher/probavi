@@ -67,7 +67,7 @@ func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) 
 		hostID:        testHostID,
 		awaitInterval: time.Millisecond,
 		awaitCap:      50 * time.Millisecond,
-		alive:         sandbox.ProcessAlive,
+		alive:         sandbox.OwnerAlive,
 	}, fake
 }
 
@@ -607,10 +607,10 @@ func TestSweepAsksTheOwnerLivenessCheck(t *testing.T) {
 			}
 			p, _ := testProvider(t, responses...)
 			asked := 0
-			p.alive = func(pid int) bool {
+			p.alive = func(id string) bool {
 				asked++
-				if pid != 4242 {
-					t.Errorf("liveness asked about pid %d, want the label's 4242", pid)
+				if id != "4242" {
+					t.Errorf("liveness asked about %q, want the label's 4242", id)
 				}
 				return tt.alive
 			}

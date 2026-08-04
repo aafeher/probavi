@@ -77,6 +77,27 @@ always called out explicitly.
 
 ### Fixed
 
+- A recycled pid no longer makes a dead sandbox owner look alive. The
+  orphan sweep decided ownership from the pid alone, so when the process
+  that created a sandbox died abnormally and an unrelated process later
+  inherited its pid, the sweep read "alive" and left the sandbox — holding
+  restored production data — until that pid happened to be free during some
+  later sweep.
+
+  The pid label and the remotehost marker now carry an owner id: the pid,
+  plus a token that a process inheriting the pid cannot match. The token is
+  the process start time, which two processes sharing a pid cannot share,
+  because the second started after the first exited.
+
+  Linux only, and safe elsewhere by construction: where the operating
+  system does not offer a start time cheaply, the id is the bare pid and
+  the sweep falls back to the previous rule — the same answer as before,
+  never the destructive one. An id written before this change is a bare pid
+  too, so existing sandboxes keep being judged exactly as they were.
+
+  The separator is a dash, not a colon: these ids become Kubernetes label
+  values, where a colon is invalid — a test pins the id against that shape
+  so the constraint cannot be broken from a unit test's blind side.
 - The evidence log's directory entry is now flushed when the store opens.
   Every append fsyncs the file, which promises its bytes reached the disk —
   but the name pointing at those bytes lives in the parent directory, and
