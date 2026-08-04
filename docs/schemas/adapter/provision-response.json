@@ -18,7 +18,7 @@
         "size_bytes": { "type": "integer", "minimum": 0 },
         "created_at": {
           "oneOf": [{ "$ref": "#/$defs/rfc3339" }, { "type": "null" }],
-          "description": "The backup's own creation time if derivable, else null."
+          "description": "The backup's own creation time if derivable, else null. Any RFC 3339 instant; the core normalizes it to the evidence schema's millisecond UTC form by truncation (adapter protocol §6.2)."
         }
       },
       "required": ["checksum", "size_bytes", "created_at"],

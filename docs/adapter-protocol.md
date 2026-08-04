@@ -322,7 +322,7 @@ Response payload:
   "source_identity": {
     "checksum": "sha256:9f2a…",
     "size_bytes": 565248,
-    "created_at": "2026-07-30T01:58:02Z"
+    "created_at": "2026-07-30T01:58:02.000Z"
   },
   "timings": {
     "engine_ready_seconds": 1.17,
@@ -338,8 +338,16 @@ Response payload:
   var — never a value.
 - `source_identity.checksum` is REQUIRED: sha256 over the source bytes. For
   multi-file sources the adapter MUST document its canonical hashing rule in
-  its README. `created_at` is the backup's own creation time if derivable,
-  else `null`. This feeds the evidence record's backup identity.
+  its README. This feeds the evidence record's backup identity.
+- `source_identity.created_at` is the backup's own creation time if
+  derivable, else `null`. It MUST be an RFC 3339 instant; any sub-second
+  precision and any offset are accepted, and the recommended form is the
+  one the evidence record itself uses, `YYYY-MM-DDThh:mm:ss.sssZ`. The core
+  converts whatever it receives to UTC with exactly millisecond precision
+  for the record's `backup.created_at` (evidence schema §3), **truncating**
+  finer digits rather than rounding them: a backup must never be recorded
+  as newer than it is. A value the core cannot parse is an `adapter_crash`
+  verdict for that drill — never a lost evidence record.
 - `timings` MUST be real measurements (monotonic clock), not estimates:
   `engine_ready_seconds` (waiting for the engine to accept connections),
   `transfer_seconds` (moving the source into the sandbox),
@@ -555,3 +563,13 @@ further change to this protocol is a version bump (§8).
   item. 2026-08-01 (no wire change): machine-readable JSON Schemas added
   under `docs/schemas/adapter/`, CI-verified against the golden files and
   message samples — §11 complete, **v0 frozen**.
+  2026-08-04 (no wire change): §6.2 now states the `created_at` contract
+  explicitly — an RFC 3339 instant of any precision, which the core
+  normalizes to the evidence schema's millisecond UTC form by truncation —
+  and the response example shows the recommended form instead of a
+  second-precision one. The field had been specified only as "the backup's
+  own creation time" while the evidence schema requires exactly
+  millisecond precision, so an adapter that passed conformance could still
+  end every drill with an unwritable record. Nothing required of adapters
+  is tightened and no conforming adapter stops conforming: a clarification
+  within v0, not a §8 version bump.

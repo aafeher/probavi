@@ -53,6 +53,28 @@ always called out explicitly.
 
   `@latest` keeps working and stays the recommended default for casual use.
 
+### Changed
+
+- **Specs:** `docs/adapter-protocol.md` §6.2 and `docs/evidence-schema.md`
+  §3 now state the `created_at` contract that neither of them carried: the
+  adapter may report any RFC 3339 instant, and the core converts it to the
+  evidence record's UTC millisecond form by truncation — never rounding, so
+  a backup is never recorded as newer than it is. An unparseable value is
+  an `adapter_crash` verdict, never a lost record.
+
+  The gap was real and reachable: the evidence schema requires exactly
+  millisecond precision, the protocol required nothing, the protocol's own
+  example showed a second-precision instant, and `probavi adapter
+  conformance` accepts any RFC 3339 — so a third-party adapter could pass
+  "15/15 conformant" and then end every drill with "evidence record could
+  not be written" after a successful restore. The four in-repo adapters
+  already emit the millisecond form, which is why CI never saw it.
+
+  No wire change and no version bump for either contract: nothing required
+  of adapters is tightened, and no adapter that conforms today stops
+  conforming. The core-side normalization that makes this true is a
+  separate change.
+
 ### Fixed
 
 - Probavi could sign records that fail Probavi's own published schema.
@@ -73,6 +95,18 @@ always called out explicitly.
   would trade a wrong code for no evidence at all, which is the worse
   failure.
 
+- The open-core boundary in `ROADMAP.md` said "proving a **single drill**
+  stays free forever". It was written on 2026-07-31, before game-days
+  existed, and read as if `probavi gameday` — multi-database,
+  dependency-ordered orchestration — were part of the commercial
+  organisational layer. It never was: game-days shipped on 2026-08-02 as
+  Apache-2.0 core and are a full free feature with no member limit. The
+  boundary is now stated by what stays free rather than by scale, the
+  README's license enumeration names game-days (plus notifications and
+  metrics) explicitly, `docs/gameday.md` says it where a game-day user
+  reads it, and `AGENTS.md` §6 declares the commercial list exhaustive so
+  the ambiguity cannot come back. No licensing change — a wording
+  correction to match what has always shipped.
 - The README's status paragraph said "Released as **v0.1.0**" after
   `0.2.0` had shipped, while the install note two sections below already
   explained why `v0.2.0` is the version to use. The landing page of a

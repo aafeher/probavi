@@ -118,7 +118,7 @@ Field reference:
 | `backup.kind` | string | no | Source kind (adapter-defined, from config). |
 | `backup.checksum` | string | yes | `sha256:` over source bytes, from the adapter's `source_identity`. Null if provisioning never got that far. |
 | `backup.size_bytes` | integer | yes | Source size. |
-| `backup.created_at` | string | yes | Backup's own creation time if derivable (RFC 3339 UTC, ms, `Z`). |
+| `backup.created_at` | string | yes | Backup's own creation time if derivable (RFC 3339 UTC, ms, `Z`). Normalized by the core from the adapter's `source_identity.created_at`, which may carry any RFC 3339 precision or offset: converted to UTC and truncated — never rounded — to milliseconds (adapter protocol §6.2). |
 | `adapter.name` / `.version` / `.protocol` | string | version: yes | Adapter identity; protocol version actually spoken. |
 | `sandbox.provider` | string | no | Provider name (`docker`, …). |
 | `sandbox.params` | object (string→string) | no | Provider parameters from config, values as written. Never tokens/handles. |
@@ -366,6 +366,13 @@ notes are collected in `spec/evidence/README.md`.
 
 ## Changelog
 
+- Editorial (2026-08-04, no format change): the `backup.created_at` row of
+  §3 records where the value comes from and how it is derived — the
+  adapter may report any RFC 3339 precision or offset, and the core
+  converts to UTC and truncates to milliseconds. The rule itself is
+  unchanged; it was simply stated in neither document, which is how an
+  adapter emitting a second-precision instant could produce a record this
+  schema rejects. Adapter protocol §6.2 carries the matching clause.
 - Editorial (2026-08-02, no format change): §12 added, recording that
   verification is permanently free and independently implemented. The worked
   example moved from `internal/evidence/testdata/` to
