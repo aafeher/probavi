@@ -71,7 +71,7 @@ func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) 
 		hostID:        testHostID,
 		target:        testTarget,
 		workspaceRoot: testRoot,
-		alive:         sandbox.ProcessAlive,
+		alive:         sandbox.OwnerAlive,
 	}, fake
 }
 
@@ -231,7 +231,7 @@ func TestCreateFullSequence(t *testing.T) {
 	want := []string{
 		quoteJoin("systemctl", "--version"),
 		quoteJoin("id", "-un"),
-		quoteJoin("sh", "-c", setupScript, "sh", ws, testHostID+" "+strconv.Itoa(os.Getpid())),
+		quoteJoin("sh", "-c", setupScript, "sh", ws, testHostID+" "+sandbox.OwnerID(os.Getpid())),
 		quoteJoin("systemd-run", "--quiet", "--collect", "--wait", "--pipe",
 			"--slice="+name+".slice", "-p", "User=drill", "-p", "WorkingDirectory="+ws, "true"),
 		quoteJoin("systemctl", "set-property", "--runtime", name+".slice", "CPUQuota=200%", "MemoryMax=2G"),
@@ -660,10 +660,10 @@ func TestSweepAsksTheOwnerLivenessCheck(t *testing.T) {
 			}
 			p, _ := testProvider(t, responses...)
 			asked := 0
-			p.alive = func(pid int) bool {
+			p.alive = func(id string) bool {
 				asked++
-				if pid != 4242 {
-					t.Errorf("liveness asked about pid %d, want the marker's 4242", pid)
+				if id != "4242" {
+					t.Errorf("liveness asked about %q, want the marker's 4242", id)
 				}
 				return tt.alive
 			}

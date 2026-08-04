@@ -160,9 +160,10 @@ type Provider struct {
 	target        string
 	workspaceRoot string
 
-	// alive reports whether a sandbox's creating process still runs. Injected
-	// so the sweep's decision can be tested without spawning processes.
-	alive func(pid int) bool
+	// alive reports whether the process a sandbox's owner id names still
+	// runs. Injected so the sweep's decision can be tested without spawning
+	// processes.
+	alive func(ownerID string) bool
 }
 
 // New returns a Provider for the target named by PROBAVI_SSH_TARGET. The
@@ -192,7 +193,7 @@ func New(logger *slog.Logger, params map[string]string) (*Provider, error) {
 		hostID:        sandbox.HostID(),
 		target:        target,
 		workspaceRoot: set.root,
-		alive:         sandbox.ProcessAlive,
+		alive:         sandbox.OwnerAlive,
 	}, nil
 }
 
@@ -324,7 +325,7 @@ func (p *Provider) remoteUser(ctx context.Context) (string, error) {
 // setup runs the target-side half of Create; any failure destroys the
 // partial sandbox.
 func (p *Provider) setup(ctx context.Context, sbx *Sandbox, set *settings) error {
-	marker := p.hostID + " " + strconv.Itoa(p.pid)
+	marker := p.hostID + " " + sandbox.OwnerID(p.pid)
 	if _, stderr, _, exit, err := p.ssh(ctx, nil,
 		"sh", "-c", setupScript, "sh", sbx.workspace, marker); err != nil {
 		return fmt.Errorf("create workspace: %w", err)
@@ -427,11 +428,7 @@ func (p *Provider) isOrphan(ctx context.Context, name string) (bool, error) {
 		if fields[0] != p.hostID {
 			return false, nil // another drill host's sandbox: never ours to sweep
 		}
-		pid, err := strconv.Atoi(fields[1])
-		if err != nil || pid <= 0 {
-			return true, nil
-		}
-		return !p.alive(pid), nil
+		return !p.alive(fields[1]), nil
 	}
 }
 

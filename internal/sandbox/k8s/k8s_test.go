@@ -71,7 +71,7 @@ func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) 
 		hostID:        "abcd1234abcd1234",
 		awaitInterval: time.Millisecond,
 		awaitCap:      50 * time.Millisecond,
-		alive:         sandbox.ProcessAlive,
+		alive:         sandbox.OwnerAlive,
 	}, fake
 }
 
@@ -123,7 +123,7 @@ func TestManifestJobShape(t *testing.T) {
 		t.Errorf("name = %q", m.Metadata.Name)
 	}
 	for _, labels := range []map[string]string{m.Metadata.Labels, m.Spec.Template.Metadata.Labels} {
-		if labels[LabelSandbox] != "1" || labels[labelHost] != p.hostID || labels[labelPID] != strconv.Itoa(p.pid) {
+		if labels[LabelSandbox] != "1" || labels[labelHost] != p.hostID || labels[labelPID] != sandbox.OwnerID(p.pid) {
 			t.Errorf("labels = %v, want sandbox, host, and pid on job and pod", labels)
 		}
 	}
@@ -589,10 +589,10 @@ func TestSweepAsksTheOwnerLivenessCheck(t *testing.T) {
 			list := `{"items":[` + sweepJobJSON("job1", "a", p.hostID, "4242") + `]}`
 			fake.responses = []response{{stdout: list}, {}}
 			asked := 0
-			p.alive = func(pid int) bool {
+			p.alive = func(id string) bool {
 				asked++
-				if pid != 4242 {
-					t.Errorf("liveness asked about pid %d, want the label's 4242", pid)
+				if id != "4242" {
+					t.Errorf("liveness asked about %q, want the label's 4242", id)
 				}
 				return tt.alive
 			}
