@@ -55,6 +55,28 @@ always called out explicitly.
 
 ### Fixed
 
+- A drill whose composed record the store refused now leaves a **degraded
+  record** instead of nothing (`docs/evidence-schema.md` §7.1, new). §7 has
+  always required that every started drill end in exactly one appended,
+  signed record; until now an unrepresentable value anywhere in the record
+  broke that rule outright, and the drill vanished from the log — which
+  reads exactly like a drill that was never scheduled.
+
+  The replacement carries only what the core itself produced — drill
+  identity, environment, total duration, `outcome: error` with
+  `error.code: internal` and a message naming both the rejection and the
+  verdict that was reached — and drops everything an adapter or the
+  configuration supplied, since one of those values is why the record was
+  refused. It uses no new fields, so no verifier needs to learn about it.
+
+  Deliberately narrow: only shape rejections are retried. A store that
+  cannot write is not a record the core can fix by rewriting it, and a
+  second attempt would bury the real error. If even the degraded record
+  fails, the original "left no evidence" error surfaces as before.
+
+  A degraded record is a bug report, not a verdict — it is logged at error
+  level and never claims `pass`.
+
 - The README's status paragraph said "Released as **v0.1.0**" after
   `0.2.0` had shipped, while the install note two sections below already
   explained why `v0.2.0` is the version to use. The landing page of a
