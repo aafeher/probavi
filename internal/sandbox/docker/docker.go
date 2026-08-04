@@ -103,6 +103,10 @@ type Provider struct {
 
 	awaitInterval time.Duration
 	awaitCap      time.Duration
+
+	// alive reports whether a sandbox's creating process still runs. Injected
+	// so the sweep's decision can be tested without spawning processes.
+	alive func(pid int) bool
 }
 
 // New returns a Provider shelling out to the "docker" binary.
@@ -118,6 +122,7 @@ func New(logger *slog.Logger) *Provider {
 		hostID:        sandbox.HostID(),
 		awaitInterval: awaitInterval,
 		awaitCap:      maxAwaitUptime,
+		alive:         sandbox.ProcessAlive,
 	}
 }
 
@@ -224,10 +229,7 @@ func (p *Provider) isOrphan(ctx context.Context, id string) (bool, error) {
 	if err != nil || pid <= 0 {
 		return true, nil
 	}
-	if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err != nil {
-		return true, nil
-	}
-	return false, nil
+	return !p.alive(pid), nil
 }
 
 // ID returns the container id.

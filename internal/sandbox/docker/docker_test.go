@@ -65,6 +65,7 @@ func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) 
 		hostID:        testHostID,
 		awaitInterval: time.Millisecond,
 		awaitCap:      50 * time.Millisecond,
+		alive:         sandbox.ProcessAlive,
 	}, fake
 }
 
@@ -75,6 +76,9 @@ func TestNewDefaults(t *testing.T) {
 	}
 	if p.awaitInterval != awaitInterval || p.awaitCap != maxAwaitUptime || p.pid != os.Getpid() {
 		t.Errorf("New: interval=%v cap=%v pid=%d, want package defaults", p.awaitInterval, p.awaitCap, p.pid)
+	}
+	if p.alive == nil {
+		t.Error("New: alive is nil — the orphan sweep would panic on its first labeled container")
 	}
 	if len(p.hostID) != 16 {
 		t.Errorf("hostID = %q, want 16 hex chars", p.hostID)
@@ -523,4 +527,52 @@ func containsSequence(haystack, needle []string) bool {
 		}
 	}
 	return false
+}
+
+// TestSweepAsksTheOwnerLivenessCheck pins the decision the sweep used to
+// get wrong off Linux. The old implementation stat'ed /proc/<pid>, which
+// does not exist on macOS — where Probavi also ships binaries — so every
+// labeled container looked orphaned and a starting drill destroyed the
+// running sandbox of a concurrent one. The verdict now comes from a
+// liveness check with no platform hole, and this test drives both answers.
+func TestSweepAsksTheOwnerLivenessCheck(t *testing.T) {
+	tests := []struct {
+		name        string
+		alive       bool
+		wantRemoved []string
+	}{
+		{"live owner is spared", true, []string{}},
+		{"dead owner is swept", false, []string{"sbx1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			responses := []response{
+				{stdout: "sbx1\n"},
+				{stdout: testHostID + "|4242\n"},
+			}
+			if !tt.alive {
+				responses = append(responses, response{exit: 0}) // rm sbx1
+			}
+			p, _ := testProvider(t, responses...)
+			asked := 0
+			p.alive = func(pid int) bool {
+				asked++
+				if pid != 4242 {
+					t.Errorf("liveness asked about pid %d, want the label's 4242", pid)
+				}
+				return tt.alive
+			}
+
+			removed, err := p.SweepOrphans(context.Background())
+			if err != nil {
+				t.Fatalf("SweepOrphans: %v", err)
+			}
+			if !slices.Equal(removed, tt.wantRemoved) {
+				t.Errorf("removed = %v, want %v", removed, tt.wantRemoved)
+			}
+			if asked != 1 {
+				t.Errorf("liveness asked %d times, want exactly 1", asked)
+			}
+		})
+	}
 }
