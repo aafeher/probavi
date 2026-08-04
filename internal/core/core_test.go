@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/probavi/probavi/internal/adapter"
 	"github.com/probavi/probavi/internal/config"
@@ -19,13 +20,14 @@ import (
 // --- fakes -----------------------------------------------------------------
 
 type fakeAdapter struct {
-	probe       *adapter.ProbeResult
-	probeErr    error
-	provRes     *adapter.ProvisionResult
-	provErr     error
-	healthy     bool
-	healthEr    error
-	teardownErr error
+	probe        *adapter.ProbeResult
+	probeErr     error
+	provRes      *adapter.ProvisionResult
+	provErr      error
+	healthy      bool
+	healthDetail string
+	healthEr     error
+	teardownErr  error
 
 	provReq         *adapter.ProvisionRequest
 	teardownReasons []string
@@ -45,7 +47,11 @@ func (f *fakeAdapter) Healthcheck(context.Context, *adapter.Connection, json.Raw
 	if f.healthEr != nil {
 		return nil, f.healthEr
 	}
-	return &adapter.HealthcheckResult{Healthy: f.healthy, Detail: "checked"}, nil
+	detail := f.healthDetail
+	if detail == "" {
+		detail = "checked"
+	}
+	return &adapter.HealthcheckResult{Healthy: f.healthy, Detail: detail}, nil
 }
 
 func (f *fakeAdapter) Teardown(_ context.Context, state json.RawMessage, reason string, _ adapter.SandboxVerbs) (*adapter.TeardownResult, error) {
@@ -491,16 +497,6 @@ func TestResolvePassword(t *testing.T) {
 	}
 }
 
-func TestSanitizeMessage(t *testing.T) {
-	if got := sanitizeMessage("line1\nline2\rline3"); got != "line1 line2 line3" {
-		t.Errorf("sanitizeMessage = %q", got)
-	}
-	long := sanitizeMessage(strings.Repeat("m", 600))
-	if len(long) != 500 || !strings.HasSuffix(long, "...") {
-		t.Errorf("long message: len=%d", len(long))
-	}
-}
-
 func TestHostIDFallback(t *testing.T) {
 	fa := &fakeAdapter{probe: testProbe(), provRes: testProvision(), healthy: true}
 	fp := &fakeProvider{sbx: &fakeSandbox{execValue: "1"}}
@@ -559,5 +555,86 @@ func TestUnregisteredErrorCodeIsNormalized(t *testing.T) {
 				t.Errorf("signed record carries %q, which is outside the published vocabulary", rec.Error.Code)
 			}
 		})
+	}
+// TestNonASCIIFailureTextStillLeavesARecord is the regression test for the
+// class of bug where a drill ran and then lost its proof. Both strings are
+// non-ASCII and longer than their evidence caps: an adapter reporting an
+// engine error in its own language, and a healthcheck detail carrying
+// accented output. Counting characters instead of bytes made the first
+// exceed the 512-byte limit, and slicing at a byte offset made the second
+// invalid UTF-8; either one made Append reject the record.
+func TestNonASCIIFailureTextStillLeavesARecord(t *testing.T) {
+	t.Run("adapter error message", func(t *testing.T) {
+		fa := &fakeAdapter{
+			probe:   testProbe(),
+			provErr: &adapter.Error{Code: "restore_failed", Message: strings.Repeat("á", 400)},
+		}
+		d, _ := newDrill(t, fa, &fakeProvider{sbx: &fakeSandbox{execValue: "1"}})
+
+		rec, err := d.Run(context.Background())
+		if err != nil {
+			t.Fatalf("a drill that ran must leave a record: %v", err)
+		}
+		if len(rec.Error.Message) > 512 {
+			t.Errorf("error.message is %d bytes, over the schema cap", len(rec.Error.Message))
+		}
+		if !utf8.ValidString(rec.Error.Message) {
+			t.Error("error.message is not valid UTF-8")
+		}
+		if rec.Outcome != evidence.OutcomeFail {
+			t.Errorf("outcome = %q, want fail", rec.Outcome)
+		}
+	})
+
+	t.Run("check detail", func(t *testing.T) {
+		fa := &fakeAdapter{
+			probe: testProbe(), provRes: testProvision(), healthy: true,
+			healthDetail: strings.Repeat("é", 300),
+		}
+		d, _ := newDrill(t, fa, &fakeProvider{sbx: &fakeSandbox{execValue: "1"}})
+
+		rec, err := d.Run(context.Background())
+		if err != nil {
+			t.Fatalf("a drill that ran must leave a record: %v", err)
+		}
+		if len(rec.Checks) == 0 || rec.Checks[0].Detail == nil {
+			t.Fatal("expected a detail on the first check")
+		}
+		detail := *rec.Checks[0].Detail
+		if len(detail) > 256 {
+			t.Errorf("detail is %d bytes, over the schema cap", len(detail))
+		}
+		if !utf8.ValidString(detail) {
+			t.Error("detail is not valid UTF-8")
+		}
+	})
+}
+
+func TestSanitizeMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"passes short text through", "restore failed", "restore failed"},
+		{"folds newlines to spaces", "line one\nline two\r\nthree", "line one line two  three"},
+		{"keeps non-ASCII intact when it fits", "hiba: nem sikerült", "hiba: nem sikerült"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeMessage(tt.in); got != tt.want {
+				t.Errorf("sanitizeMessage(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+
+	for _, filler := range []string{"a", "á", "€", "𝄞"} {
+		got := sanitizeMessage(strings.Repeat(filler, 600))
+		if len(got) > 512 {
+			t.Errorf("%q filler: %d bytes, over the 512-byte cap", filler, len(got))
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("%q filler: result is not valid UTF-8", filler)
+		}
 	}
 }

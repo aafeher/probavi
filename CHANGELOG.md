@@ -94,6 +94,26 @@ always called out explicitly.
   It is normalization rather than rejection on purpose: refusing the record
   would trade a wrong code for no evidence at all, which is the worse
   failure.
+- Non-ASCII failure text could make a completed drill leave **no evidence
+  record**. Two producers of record fields measured in characters what the
+  record layer measures in bytes, or cut a string without regard for
+  encoding:
+
+  - `core.sanitizeMessage` capped `error.message` at 500 *runes* against a
+    512-*byte* limit, so an adapter reporting an engine error in an
+    accented language — 400 characters, 800 bytes — was rejected;
+  - `checks.truncateDetail` sliced `checks[].detail` at a byte offset,
+    splitting a rune whenever engine stderr crossed the cap with non-ASCII
+    text, and the invalid UTF-8 was rejected.
+
+  Either one meant exit 5 after a successful restore. Both now use
+  `evidence.TruncateLine`, which truncates on byte length at a rune
+  boundary, alongside the exported `MaxDetailBytes` / `MaxErrorMessageBytes`
+  caps — the mismatch between a producer's private constant and the
+  schema's real limit was the bug, so the limits now have one home. The
+  helper is swept across every budget and every UTF-8 stride, and a
+  regression test drives a full drill with non-ASCII text through the real
+  store.
 
 - The open-core boundary in `ROADMAP.md` said "proving a **single drill**
   stays free forever". It was written on 2026-07-31, before game-days
