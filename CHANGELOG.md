@@ -77,6 +77,15 @@ always called out explicitly.
 
 ### Fixed
 
+- The German usage block had one line running past the width the rest of
+  the block wraps at, which shows in a terminal as a ragged paragraph. It
+  is rewrapped; the block now measures exactly what the English does.
+
+  Found by a systematic review pass over the translated surfaces —
+  terminology against each catalog's own vocabulary, register, line widths,
+  format verbs. It is not the native-speaker review `docs/i18n.md` §5 asks
+  for, and that one is still owed; what it found is recorded as follow-up
+  work rather than acted on where the call belongs to a native speaker.
 - A `target.pitr.target_time` in the future is refused at config load. A
   drill can only prove recovery to an instant that has happened; an engine
   handed a future target simply recovers as far as it can, so the drill
