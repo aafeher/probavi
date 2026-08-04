@@ -294,26 +294,40 @@ func teardownReason(rec *evidence.Record) string {
 // failCodes are the recoverability verdicts of evidence-schema.md §7: the
 // backup or restore is the problem, not the infrastructure.
 var failCodes = map[string]bool{
-	"source_not_found": true, "source_unreadable": true,
-	"source_corrupt": true, "restore_failed": true, "check_failed": true,
+	evidence.CodeSourceNotFound:   true,
+	evidence.CodeSourceUnreadable: true,
+	evidence.CodeSourceCorrupt:    true,
+	evidence.CodeRestoreFailed:    true,
+	evidence.CodeCheckFailed:      true,
 }
 
 // classify converts any drill-phase failure into record content following
 // the §7 outcome taxonomy.
 func (d *Drill) classify(ctx context.Context, rec *evidence.Record, err error) {
-	code, message := "internal", sanitizeMessage(err.Error())
+	code, message := evidence.CodeInternal, err.Error()
 	var aerr *adapter.Error
 	if errors.As(err, &aerr) {
-		code, message = aerr.Code, sanitizeMessage(aerr.Message)
+		code, message = aerr.Code, aerr.Message
 	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		code = "timeout"
+		code = evidence.CodeTimeout
 		message = "drill wall-clock limit exceeded: " + message
 	}
+	// The adapter chooses its own code, and a record carrying one outside
+	// the published vocabulary would verify as VALID while failing the
+	// schema every consumer validates against — a contradiction a trust
+	// product cannot ship. Map it to internal and keep the original where
+	// it stays readable.
+	if !evidence.IsErrorCode(code) {
+		message = fmt.Sprintf("adapter %s reported unregistered error code %q: %s",
+			d.Config.Target.Adapter, code, message)
+		code = evidence.CodeInternal
+	}
+	message = sanitizeMessage(message)
 	switch {
 	case failCodes[code]:
 		rec.Outcome = evidence.OutcomeFail
-	case code == "cancelled":
+	case code == evidence.CodeCancelled:
 		rec.Outcome = evidence.OutcomeCancelled
 	default:
 		rec.Outcome = evidence.OutcomeError
