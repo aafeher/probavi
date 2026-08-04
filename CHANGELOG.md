@@ -13,6 +13,31 @@ always called out explicitly.
 
 ### Added
 
+- Translated README introductions in Hungarian, German, French, and
+  Spanish (`README.hu.md`, `README.de.md`, `README.fr.md`,
+  `README.es.md`), matching four of the shipped CLI locales — an operator
+  who reads Probavi's diagnostics in their language can now read what
+  Probavi is in the same language. Deliberately narrow (`docs/i18n.md`
+  §7): only the stable spans of `README.md` are translated — what Probavi
+  is, why it exists, the non-goals. Status, install, examples, and every
+  capability inventory stay English-only, because a translated copy of
+  them is a claim nobody can keep in sync; `docs/capabilities.json`
+  remains the single machine-readable statement of what ships. The
+  specs in `docs/` are normative and stay English-only.
+
+  Translations are pinned to the English bytes they were made from: each
+  file records the SHA-256 of every span it covers, and the new
+  test-only `internal/docs` package fails the build when an English edit
+  leaves a translation behind, when a pin outlives its span, when a
+  translation smuggles in a version claim, or when the language row and
+  the committed files disagree. Same principle as the catalog gates of
+  `docs/i18n.md` §4: a translation may exist here only while a machine
+  can prove it is current. Terminology follows each language's shipped
+  CLI catalog, so the README and the terminal agree. **The German,
+  French, and Spanish texts shipped without a native-speaker review
+  pass** (docs/i18n.md §5); that review is owed, and corrections will
+  follow.
+
 - The independent evidence verifier has a tagged, pinnable release:
   `spec/evidence/v0.2.0`. It lives in its own Go module, so it carries its
   own `spec/evidence/vX.Y.Z` tags and versions independently of the

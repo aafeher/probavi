@@ -1,5 +1,8 @@
 # Probavi
 
+**English** · [Magyar](README.hu.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md)
+
+<!-- i18n:intro:start -->
 *Probavi* — Latin for **"I have proven."** The perfect tense is the point: not "we test restores", but "this restore was performed and proven, here is the signed record."
 
 **You have backups. But when did you last prove they restore?**
@@ -17,6 +20,7 @@ The output is not a green checkmark. It is an auditable, cryptographically verif
 - The "backup completed successfully" log line proves almost nothing. Backups fail silently: corruption, missing WAL segments, version mismatches, lost encryption keys, wrong databases backed up for months.
 - Regulations increasingly require *tested and documented* recovery capability, not just backups (see EU DORA, NIS2, and NIST contingency-planning guidance).
 - Cloud providers offer restore testing for their own managed services. If you run databases on your own VMs, bare metal, or a mixed estate, there is no neutral, open tool that does this for you. Probavi is that tool.
+<!-- i18n:intro:end -->
 
 ## Status
 
@@ -266,9 +270,11 @@ The CLI speaks English by default and is localizable (`docs/i18n.md`): set `PROB
 - **Sandboxes are pluggable.** Docker containers and Kubernetes Jobs today, remote hosts later. The core only asks for "a disposable runtime".
 - **Evidence is the product.** Every run appends a hash-chained, ed25519-signed record. History cannot be silently rewritten, and third parties can verify it without trusting your dashboard.
 
+<!-- i18n:non-goals:start -->
 ## Non-goals
 
 Probavi will **not**: take backups, implement its own scheduler, manage database credentials beyond what a drill needs, or attempt to be a monitoring platform. Small core, sharp purpose.
+<!-- i18n:non-goals:end -->
 
 ## Contributing
 
