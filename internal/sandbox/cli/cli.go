@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 
 	"github.com/probavi/probavi/internal/sandbox"
@@ -19,16 +20,24 @@ import (
 type Runner interface {
 	// Run executes name with args. err reports spawn/context failures only;
 	// a non-zero exit code is returned in exitCode with err == nil.
-	Run(ctx context.Context, stdin io.Reader, name string, args ...string) (stdout, stderr []byte, truncated bool, exitCode int, err error)
+	//
+	// env entries ("NAME=value") are added to the child's environment on top
+	// of the parent's. They exist so a secret can reach a CLI without
+	// appearing in its argv, where every local user could read it out of the
+	// process list; nil means "inherit and nothing more".
+	Run(ctx context.Context, stdin io.Reader, env []string, name string, args ...string) (stdout, stderr []byte, truncated bool, exitCode int, err error)
 }
 
 // ExecRunner runs commands with os/exec.
 type ExecRunner struct{}
 
 // Run implements Runner.
-func (ExecRunner) Run(ctx context.Context, stdin io.Reader, name string, args ...string) ([]byte, []byte, bool, int, error) {
+func (ExecRunner) Run(ctx context.Context, stdin io.Reader, env []string, name string, args ...string) ([]byte, []byte, bool, int, error) {
 	var out, errOut limitedWriter
 	cmd := exec.CommandContext(ctx, name, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stdin = stdin
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut

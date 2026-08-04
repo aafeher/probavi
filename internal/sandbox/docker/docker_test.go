@@ -26,13 +26,15 @@ type response struct {
 
 // fakeRunner scripts subprocess responses and records every invocation.
 type fakeRunner struct {
+	envs      [][]string
 	t         *testing.T
 	calls     [][]string
 	stdins    []string
 	responses []response
 }
 
-func (f *fakeRunner) Run(_ context.Context, stdin io.Reader, name string, args ...string) ([]byte, []byte, bool, int, error) {
+func (f *fakeRunner) Run(_ context.Context, stdin io.Reader, env []string, name string, args ...string) ([]byte, []byte, bool, int, error) {
+	f.envs = append(f.envs, env)
 	f.t.Helper()
 	in := ""
 	if stdin != nil {
@@ -221,14 +223,7 @@ func TestExec(t *testing.T) {
 		if res.Duration <= 0 {
 			t.Error("duration must be measured")
 		}
-		call := strings.Join(fake.calls[0], " ")
-		want := "docker exec -i -e A=1 -e B=2 abc123 psql -c SELECT 1"
-		if call != want {
-			t.Errorf("call = %q, want %q (env must be sorted, -i only with stdin)", call, want)
-		}
-		if fake.stdins[0] != "stdin-data" {
-			t.Errorf("stdin = %q, want stdin-data", fake.stdins[0])
-		}
+		assertExecCall(t, fake)
 	})
 
 	t.Run("no -i without stdin", func(t *testing.T) {
@@ -523,4 +518,61 @@ func containsSequence(haystack, needle []string) bool {
 		}
 	}
 	return false
+}
+
+// TestExecKeepsSecretsOutOfArgv is the regression test for the leak this
+// provider used to have: the resolved database password reached
+// `docker exec -e NAME=value`, so it sat in the drill host's process list
+// for every local user to read. internal/checks refuses {{password}} in
+// sql_runner argv for exactly that reason — the provider was undoing the
+// protection one layer down.
+func TestExecKeepsSecretsOutOfArgv(t *testing.T) {
+	const secret = "s3cr3t-ephemeral-password"
+	p, fake := testProvider(t, response{})
+	sbx := &Sandbox{id: "abc123", p: p}
+
+	if _, err := sbx.Exec(context.Background(), sandbox.ExecRequest{
+		Argv: []string{"psql", "-c", "SELECT 1"},
+		Env:  map[string]string{"PGPASSWORD": secret},
+	}); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+
+	for _, arg := range fake.calls[0] {
+		if strings.Contains(arg, secret) {
+			t.Fatalf("argv %q carries the secret — visible in ps to every local user", arg)
+		}
+	}
+	if !slices.Contains(fake.calls[0], "PGPASSWORD") {
+		t.Error("argv must still name the variable so docker forwards it")
+	}
+	if !slices.Equal(fake.envs[0], []string{"PGPASSWORD=" + secret}) {
+		t.Errorf("child env = %v, want the secret delivered out of band", fake.envs[0])
+	}
+}
+
+// assertExecCall checks the shape of a full exec invocation: env by name in
+// argv, values out of band in the child's environment, -i only with stdin.
+func assertExecCall(t *testing.T, fake *fakeRunner) {
+	t.Helper()
+	call := strings.Join(fake.calls[0], " ")
+	want := "docker exec -i -e A -e B abc123 psql -c SELECT 1"
+	if call != want {
+		t.Errorf("call = %q, want %q (env by name only, sorted; -i only with stdin)", call, want)
+	}
+	// The values travel in the docker CLI's own environment. Naming them in
+	// argv would put every one of them in `ps` output for any local user to
+	// read, which is exactly what the sql_runner template refuses to do with
+	// {{password}}.
+	if !slices.Equal(fake.envs[0], []string{"A=1", "B=2"}) {
+		t.Errorf("child env = %v, want the values passed out of band", fake.envs[0])
+	}
+	for _, arg := range fake.calls[0] {
+		if strings.Contains(arg, "=1") || strings.Contains(arg, "=2") {
+			t.Errorf("argv %q carries an environment value", arg)
+		}
+	}
+	if fake.stdins[0] != "stdin-data" {
+		t.Errorf("stdin = %q, want stdin-data", fake.stdins[0])
+	}
 }

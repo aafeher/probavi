@@ -142,6 +142,7 @@ var Descriptor = sandbox.Descriptor{
 		fmt.Sprintf("systemd %d or newer on the target, probed at first contact.", minSystemdVersion),
 		"Engine and tool versions are whatever the target host has installed; the version match a sandbox image guarantees does not apply here.",
 		"Requires the right to run transient systemd units as the drill user — the polkit rule the README ships.",
+		"Per-command environment values (including a database password a check needs) are passed as `env NAME=value` in the remote command line, so they appear in the process list on both the drill host and the target. ssh has no out-of-band environment channel that does not depend on the server's AcceptEnv; the docker provider does not have this exposure.",
 		"The target is named by the " + EnvTarget + " environment variable only, never in drill config: sandbox params are recorded verbatim in signed evidence, and connection details must never appear there.",
 	},
 	VerifiedAgainst: []string{"systemd host over the OpenSSH CLI (CI integration suite)"},
@@ -554,7 +555,7 @@ func (p *Provider) ssh(ctx context.Context, stdin io.Reader, argv ...string) ([]
 	for i, a := range argv {
 		quoted[i] = shQuote(a)
 	}
-	return p.run.Run(ctx, stdin, p.bin, "-o", "BatchMode=yes", p.target, strings.Join(quoted, " "))
+	return p.run.Run(ctx, stdin, nil, p.bin, "-o", "BatchMode=yes", p.target, strings.Join(quoted, " "))
 }
 
 // shQuote wraps s in single quotes for the remote POSIX shell, closing and
