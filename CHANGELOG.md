@@ -77,6 +77,22 @@ always called out explicitly.
 
 ### Fixed
 
+- Three README claims had gone stale, all in the understating direction:
+  the sandbox list omitted the `remotehost` provider that shipped
+  2026-08-01, the design principles still called bare hosts future work,
+  and the localization paragraph described Hungarian as "the first
+  supported national language (further EU languages arrive per the
+  ROADMAP)" while all 24 official EU languages were already shipping.
+
+  `docs/capabilities.json` is generated from the code and CI-checked for
+  drift, and AGENTS.md §5.8 makes it the only permitted source of
+  capability claims for downstream surfaces — but nothing tied the
+  README itself to it. `internal/docs` now does: every shipped adapter and
+  sandbox provider must appear in the README, and a line that both names
+  one and describes it as future work ("later", "planned", "arrives", …)
+  fails the build. The rule reads only lines naming a shipped capability,
+  so ordinary roadmap prose is untouched.
+
 - A cancelled drill is now recorded as `cancelled`. `classify` mapped only
   `context.DeadlineExceeded` to a verdict, so Ctrl-C or SIGTERM produced
   whatever the dying adapter last managed to say — usually
