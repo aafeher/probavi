@@ -71,6 +71,7 @@ func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) 
 		hostID:        testHostID,
 		target:        testTarget,
 		workspaceRoot: testRoot,
+		alive:         sandbox.ProcessAlive,
 	}, fake
 }
 
@@ -117,6 +118,9 @@ func TestNewDefaults(t *testing.T) {
 	}
 	if p.bin != "ssh" || p.run == nil || p.logger == nil || p.pid != os.Getpid() {
 		t.Errorf("New: %+v, want ssh binary with runner, logger, and pid", p)
+	}
+	if p.alive == nil {
+		t.Error("New: alive is nil — the orphan sweep would panic on its first marker")
 	}
 	if len(p.hostID) != 16 {
 		t.Errorf("hostID = %q, want 16 hex chars", p.hostID)
@@ -627,5 +631,51 @@ func TestParseParamsRejectsUnhandledDeclaredParam(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "declared but not implemented") {
 		t.Errorf("error %q does not explain the defect", err)
+	}
+}
+
+// TestSweepAsksTheOwnerLivenessCheck is the remotehost half of the
+// portability fix: see the docker provider's test of the same name. The
+// owner process runs on the drill host, so its liveness must be decided
+// without /proc — which a macOS drill host does not have.
+func TestSweepAsksTheOwnerLivenessCheck(t *testing.T) {
+	tests := []struct {
+		name        string
+		alive       bool
+		wantRemoved []string
+	}{
+		{"live owner is spared", true, []string{}},
+		{"dead owner is swept", false, []string{"probavi-sbx-one"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			responses := []response{
+				{stdout: "probavi-sbx-one\n"},
+				{stdout: testHostID + " 4242\n"},
+			}
+			if !tt.alive {
+				responses = append(responses, response{}) // destroy
+			}
+			p, _ := testProvider(t, responses...)
+			asked := 0
+			p.alive = func(pid int) bool {
+				asked++
+				if pid != 4242 {
+					t.Errorf("liveness asked about pid %d, want the marker's 4242", pid)
+				}
+				return tt.alive
+			}
+
+			removed, err := p.SweepOrphans(context.Background())
+			if err != nil {
+				t.Fatalf("SweepOrphans: %v", err)
+			}
+			if !slices.Equal(removed, tt.wantRemoved) {
+				t.Errorf("removed = %v, want %v", removed, tt.wantRemoved)
+			}
+			if asked != 1 {
+				t.Errorf("liveness asked %d times, want exactly 1", asked)
+			}
+		})
 	}
 }
