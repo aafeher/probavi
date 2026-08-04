@@ -105,6 +105,18 @@ always called out explicitly.
   while Go's `time.RFC3339` layout rejects them — an adapter whose output
   validates against the published schema must not fail certification.
 
+- The open-core boundary in `ROADMAP.md` said "proving a **single drill**
+  stays free forever". It was written on 2026-07-31, before game-days
+  existed, and read as if `probavi gameday` — multi-database,
+  dependency-ordered orchestration — were part of the commercial
+  organisational layer. It never was: game-days shipped on 2026-08-02 as
+  Apache-2.0 core and are a full free feature with no member limit. The
+  boundary is now stated by what stays free rather than by scale, the
+  README's license enumeration names game-days (plus notifications and
+  metrics) explicitly, `docs/gameday.md` says it where a game-day user
+  reads it, and `AGENTS.md` §6 declares the commercial list exhaustive so
+  the ambiguity cannot come back. No licensing change — a wording
+  correction to match what has always shipped.
 - The README's status paragraph said "Released as **v0.1.0**" after
   `0.2.0` had shipped, while the install note two sections below already
   explained why `v0.2.0` is the version to use. The landing page of a
