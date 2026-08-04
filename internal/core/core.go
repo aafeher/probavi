@@ -395,9 +395,18 @@ func (d *Drill) classify(ctx context.Context, rec *evidence.Record, err error) {
 	if errors.As(err, &aerr) {
 		code, message = aerr.Code, aerr.Message
 	}
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	// The drill's own context outranks whatever the adapter managed to say
+	// on its way down. An adapter killed by a deadline or a signal usually
+	// reports adapter_crash — true of the process, and a lie about the
+	// drill: the record would blame a third party's adapter for the
+	// operator's Ctrl-C, in a document written to be read by an auditor.
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		code = evidence.CodeTimeout
 		message = "drill wall-clock limit exceeded: " + message
+	case errors.Is(ctx.Err(), context.Canceled):
+		code = evidence.CodeCancelled
+		message = "drill cancelled: " + message
 	}
 	// The adapter chooses its own code, and a record carrying one outside
 	// the published vocabulary would verify as VALID while failing the

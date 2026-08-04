@@ -768,3 +768,68 @@ func TestSafeText(t *testing.T) {
 		})
 	}
 }
+
+// TestCancelledContextIsRecordedAsCancelled covers the outcome the schema
+// defines for an operator stopping a drill. Before this, only an adapter
+// that managed to answer with code "cancelled" produced it: a SIGTERM that
+// killed the adapter outright was recorded as adapter_crash, so the signed
+// record blamed a third party's adapter for the operator's own interrupt.
+func TestCancelledContextIsRecordedAsCancelled(t *testing.T) {
+	tests := []struct {
+		name    string
+		adapter *adapter.Error
+	}{
+		{"adapter died without answering", &adapter.Error{Code: "adapter_crash", Message: "adapter exited without a final response"}},
+		{"adapter answered cancelled itself", &adapter.Error{Code: "cancelled", Message: "stopping"}},
+		{"adapter blamed the restore", &adapter.Error{Code: "restore_failed", Message: "half-written"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fa := &fakeAdapter{probe: testProbe(), provErr: tt.adapter}
+			d, _ := newDrill(t, fa, &fakeProvider{sbx: &fakeSandbox{execValue: "1"}})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			rec, err := d.Run(ctx)
+			if err != nil {
+				t.Fatalf("a cancelled drill still leaves a record: %v", err)
+			}
+			if rec.Outcome != evidence.OutcomeCancelled {
+				t.Errorf("outcome = %q, want cancelled", rec.Outcome)
+			}
+			if rec.Error.Code != evidence.CodeCancelled {
+				t.Errorf("error.code = %q, want cancelled", rec.Error.Code)
+			}
+			// The adapter's own words survive; only the verdict changes.
+			if !strings.Contains(rec.Error.Message, tt.adapter.Message) {
+				t.Errorf("message %q dropped what the adapter said", rec.Error.Message)
+			}
+			if fa.teardownReasons[0] != "cancelled" {
+				t.Errorf("teardown reason = %q, want cancelled", fa.teardownReasons[0])
+			}
+		})
+	}
+}
+
+// TestDeadlineOutranksCancellation pins the order of the two context
+// verdicts: a drill that ran out of its wall-clock limit is a timeout, not
+// a cancellation, even though the context is done either way.
+func TestDeadlineOutranksCancellation(t *testing.T) {
+	fa := &fakeAdapter{probe: testProbe(), provErr: &adapter.Error{Code: "adapter_crash", Message: "killed"}}
+	d, _ := newDrill(t, fa, &fakeProvider{sbx: &fakeSandbox{execValue: "1"}})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+
+	rec, err := d.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rec.Outcome != evidence.OutcomeError || rec.Error.Code != evidence.CodeTimeout {
+		t.Errorf("outcome = %q code = %q, want error/timeout", rec.Outcome, rec.Error.Code)
+	}
+	if fa.teardownReasons[0] != "timeout" {
+		t.Errorf("teardown reason = %q, want timeout", fa.teardownReasons[0])
+	}
+}
