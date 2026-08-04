@@ -94,7 +94,7 @@ var Descriptor = sandbox.Descriptor{
 		"Requires a working kubectl context with rights to create, exec into, and delete Jobs in the target namespace; the kubectl CLI is driven directly, never client-go.",
 		"Network isolation is the cluster's job: the pod carries the sandbox label so a NetworkPolicy can select it. There is no pod-level equivalent of the docker provider's --network none.",
 		"The pod runs with no service-account token, no service links, and the RuntimeDefault seccomp profile.",
-		"Per-command environment values (including a database password a check needs) are passed as `env NAME=value` in the exec command line, so they appear in the process list on the drill host and inside the pod. kubectl exec has no out-of-band environment channel; the docker provider does not have this exposure.",
+		"Per-command environment values reach the command through stdin, never the command line: kubectl exec has no environment flag, and a value in argv would be readable from the process list on the drill host and inside the pod. Requires sh in the image, as put_file already does.",
 	},
 	VerifiedAgainst: []string{"kind cluster (CI integration suite)"},
 }
@@ -238,21 +238,27 @@ func (s *Sandbox) Exec(ctx context.Context, req sandbox.ExecRequest) (*sandbox.E
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
 		defer cancel()
 	}
+	stdin := string(req.Stdin)
 	args := []string{"exec", "-n", s.namespace}
-	if len(req.Stdin) > 0 {
+	if len(req.Stdin) > 0 || len(req.Env) > 0 {
 		args = append(args, "-i")
 	}
 	args = append(args, s.pod, "--")
 	if len(req.Env) > 0 {
-		args = append(args, "env")
-		for _, k := range sortedKeys(req.Env) {
-			args = append(args, k+"="+req.Env[k])
+		// kubectl exec has no environment flag, so the values reach the
+		// command through stdin rather than the command line, where `ps`
+		// would show them on the drill host and inside the pod alike.
+		lines, err := sandbox.EnvPreludeLines(req.Env)
+		if err != nil {
+			return nil, err
 		}
+		stdin = lines + stdin
+		args = append(args, "sh", "-c", sandbox.EnvPreludeScript(len(req.Env)), "sh")
 	}
 	args = append(args, req.Argv...)
 
 	start := time.Now()
-	stdout, stderr, truncated, exit, err := s.p.run.Run(ctx, strings.NewReader(string(req.Stdin)), nil, s.p.bin, args...)
+	stdout, stderr, truncated, exit, err := s.p.run.Run(ctx, strings.NewReader(stdin), nil, s.p.bin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("exec in sandbox %s: %w", s.ID(), err)
 	}

@@ -142,7 +142,7 @@ var Descriptor = sandbox.Descriptor{
 		fmt.Sprintf("systemd %d or newer on the target, probed at first contact.", minSystemdVersion),
 		"Engine and tool versions are whatever the target host has installed; the version match a sandbox image guarantees does not apply here.",
 		"Requires the right to run transient systemd units as the drill user — the polkit rule the README ships.",
-		"Per-command environment values (including a database password a check needs) are passed as `env NAME=value` in the remote command line, so they appear in the process list on both the drill host and the target. ssh has no out-of-band environment channel that does not depend on the server's AcceptEnv; the docker provider does not have this exposure.",
+		"Per-command environment values reach the command through stdin, never the remote command line: ssh has no environment channel independent of the target's AcceptEnv, and a value in argv would be readable from the process list on both hosts.",
 		"The target is named by the " + EnvTarget + " environment variable only, never in drill config: sandbox params are recorded verbatim in signed evidence, and connection details must never appear there.",
 	},
 	VerifiedAgainst: []string{"systemd host over the OpenSSH CLI (CI integration suite)"},
@@ -470,17 +470,24 @@ func (s *Sandbox) Exec(ctx context.Context, req sandbox.ExecRequest) (*sandbox.E
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
 		defer cancel()
 	}
+	stdin := string(req.Stdin)
 	args := s.execPrefix()
 	if len(req.Env) > 0 {
-		args = append(args, "env")
-		for _, k := range sortedKeys(req.Env) {
-			args = append(args, k+"="+req.Env[k])
+		// ssh has no out-of-band environment channel that does not depend on
+		// the target's AcceptEnv, so the values reach the command through
+		// stdin rather than the remote command line, where `ps` would show
+		// them on the drill host and on the target alike.
+		lines, err := sandbox.EnvPreludeLines(req.Env)
+		if err != nil {
+			return nil, err
 		}
+		stdin = lines + stdin
+		args = append(args, "sh", "-c", sandbox.EnvPreludeScript(len(req.Env)), "sh")
 	}
 	args = append(args, req.Argv...)
 
 	start := time.Now()
-	stdout, stderr, truncated, exit, err := s.p.ssh(ctx, strings.NewReader(string(req.Stdin)), args...)
+	stdout, stderr, truncated, exit, err := s.p.ssh(ctx, strings.NewReader(stdin), args...)
 	if err != nil {
 		return nil, fmt.Errorf("exec in sandbox %s: %w", s.name, err)
 	}

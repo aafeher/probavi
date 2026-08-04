@@ -77,6 +77,29 @@ always called out explicitly.
 
 ### Fixed
 
+- **Security:** the k8s and remotehost providers no longer put per-command
+  environment values on the command line. Both passed `env NAME=value` to
+  the command they ran, so a database password a check needs was readable
+  from the process list — on the drill host and inside the pod for k8s, on
+  the drill host and on the target for remotehost. The docker provider's
+  half of this was fixed in the previous release entry; this completes it.
+
+  Neither provider has an out-of-band environment channel (`kubectl exec`
+  has no environment flag, ssh's `SendEnv` depends on the target's
+  `AcceptEnv`), so the values now travel through stdin: the command runs
+  under a shell prelude that reads exactly N `NAME=value` lines, exports
+  each, and execs the command, whose own stdin continues untouched after
+  those lines. Both providers already require `sh`, as `put_file` does.
+
+  A value containing a newline cannot be expressed in a line protocol and
+  is rejected rather than silently truncated — exporting the tail of a
+  credential as a second variable would be the worse failure. The rejection
+  never echoes the value.
+
+  The `Descriptor.Constraints` of both providers — and therefore
+  `docs/capabilities.json` — now describe the stdin channel instead of the
+  exposure.
+
 - **Security:** resolved database passwords no longer reach the docker
   provider's command line. `internal/checks` refuses `{{password}}` in an
   `sql_runner` argv template because "a password in argv would leak into

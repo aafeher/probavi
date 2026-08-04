@@ -381,12 +381,14 @@ func TestExec(t *testing.T) {
 		}
 		want := quoteJoin("systemd-run", "--quiet", "--collect", "--wait", "--pipe",
 			"--slice="+sbx.name+".slice", "-p", "User=drill", "-p", "WorkingDirectory="+sbx.workspace,
-			"env", "A=it's", "B=2", "psql", "-c", "SELECT 'x'")
+			"sh", "-c", sandbox.EnvPreludeScript(2), "sh", "psql", "-c", "SELECT 'x'")
 		if got := remoteCmd(t, fake, 0); got != want {
-			t.Errorf("call = %s\nwant   %s (env sorted, everything quoted)", got, want)
+			t.Errorf("call = %s\nwant   %s (env via stdin, everything quoted)", got, want)
 		}
-		if fake.stdins[0] != "stdin-data" {
-			t.Errorf("stdin = %q, want stdin-data", fake.stdins[0])
+		// The env block precedes the request's own stdin, which reaches the
+		// command untouched once the prelude has consumed exactly two lines.
+		if fake.stdins[0] != "A=it's\nB=2\nstdin-data" {
+			t.Errorf("stdin = %q, want the env block followed by the caller's stdin", fake.stdins[0])
 		}
 	})
 
@@ -677,5 +679,48 @@ func TestSweepAsksTheOwnerLivenessCheck(t *testing.T) {
 				t.Errorf("liveness asked %d times, want exactly 1", asked)
 			}
 		})
+	}
+}
+
+// TestExecKeepsSecretsOutOfArgv is the regression test for this provider's
+// half of the leak: env used to be passed as `env NAME=value` in the
+// remote command line, so a database password sat in the process list on
+// the drill host and on the target. internal/checks refuses {{password}}
+// in sql_runner argv for exactly that reason.
+func TestExecKeepsSecretsOutOfArgv(t *testing.T) {
+	const secret = "s3cr3t-ephemeral-password"
+	p, fake := testProvider(t, response{})
+	sbx := testSandbox(p)
+
+	if _, err := sbx.Exec(context.Background(), sandbox.ExecRequest{
+		Argv: []string{"psql", "-c", "SELECT 1"},
+		Env:  map[string]string{"PGPASSWORD": secret},
+	}); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if cmd := remoteCmd(t, fake, 0); strings.Contains(cmd, secret) {
+		t.Fatalf("remote command carries the secret — visible in ps on both hosts: %s", cmd)
+	}
+	if !strings.HasPrefix(fake.stdins[0], "PGPASSWORD="+secret+"\n") {
+		t.Errorf("stdin = %q, want the secret delivered out of band", fake.stdins[0])
+	}
+}
+
+// TestExecRejectsUnexpressibleEnv covers the one value a line protocol
+// cannot carry. Truncating a credential silently — or exporting its tail
+// as another variable — would be worse than refusing it.
+func TestExecRejectsUnexpressibleEnv(t *testing.T) {
+	p, fake := testProvider(t)
+	sbx := testSandbox(p)
+
+	_, err := sbx.Exec(context.Background(), sandbox.ExecRequest{
+		Argv: []string{"true"},
+		Env:  map[string]string{"WEIRD": "two\nlines"},
+	})
+	if err == nil || !errors.Is(err, sandbox.ErrInvalidParams) {
+		t.Errorf("err = %v, want an invalid-params rejection", err)
+	}
+	if len(fake.calls) != 0 {
+		t.Error("nothing may be executed when the environment cannot be expressed")
 	}
 }
