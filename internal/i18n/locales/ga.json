@@ -29,7 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "target.source.credential_env: ní ainm bailí athróige timpeallachta í an iontráil %q",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "ní mór ceann amháin go beacht a bheith ag target.pitr: target_time (RFC 3339, m.sh. \"2026-07-30T14:32:00Z\") nó target_age (m.sh. \"24h\")",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "ní stampa ama RFC 3339 é target.pitr.target_time %q",
-  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "tá target.pitr.target_time %q sa todhchaí — ní féidir athchóiriú a chruthú ach go dtí nóiméad atá caite cheana",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "tá target.pitr.target_time %q sa todhchaí — ní féidir athchóiriú a chruthú ach go dtí meandar atá caite cheana",
   "sandbox.provider is required (e.g. \"docker\")": "tá an réimse sandbox.provider riachtanach (m.sh. \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "tá an réimse sandbox.timeout riachtanach — teastaíonn teorainn dhocht ama ó gach cleachtadh (m.sh. \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "tá seiceáil amháin ar a laghad riachtanach (tosaigh le \"- builtin: service_healthy\")",
