@@ -4,8 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
+	"strings"
+	"time"
 )
+
+// evidenceTimestampFormat is the evidence schema's timestamp form (§3):
+// RFC 3339 UTC with exactly millisecond precision. It is duplicated here
+// rather than imported so that the protocol client keeps knowing nothing
+// about the evidence package; TestEvidenceTimestampFormatMatches pins the
+// two constants together, so the copy cannot drift.
+const evidenceTimestampFormat = "2006-01-02T15:04:05.000Z"
 
 // Wire envelope (§3). Exactly one of SandboxCall (adapter→core) or OK
 // (final response) is present in adapter output.
@@ -240,17 +250,97 @@ func normalizeProvisionRequest(req *ProvisionRequest) {
 	}
 }
 
+// validateProvisionResult holds the response to everything the evidence
+// record will demand of it, and normalizes what the record cannot take
+// verbatim. This boundary exists so that a malformed value is an
+// adapter_crash verdict with a signed record, never a drill that restored
+// a backup and then failed to write its proof: the core composes records
+// from these fields, and evidence.Record.Validate rejects — it does not
+// repair.
 func validateProvisionResult(res *ProvisionResult) error {
 	if !checksumPattern.MatchString(res.SourceIdentity.Checksum) {
 		return crashf("provision payload: source_identity.checksum %q is not a sha256 reference", res.SourceIdentity.Checksum)
 	}
-	if res.Timings.EngineReadySeconds < 0 || res.Timings.TransferSeconds < 0 || res.Timings.RestoreSeconds < 0 {
-		return crashf("provision payload: negative timings")
+	if res.SourceIdentity.SizeBytes < 0 {
+		return crashf("provision payload: source_identity.size_bytes is negative (%d)", res.SourceIdentity.SizeBytes)
+	}
+	created, err := normalizeCreatedAt(res.SourceIdentity.CreatedAt)
+	if err != nil {
+		return err
+	}
+	res.SourceIdentity.CreatedAt = created
+	for _, t := range []struct {
+		field   string
+		seconds float64
+	}{
+		{"engine_ready_seconds", res.Timings.EngineReadySeconds},
+		{"transfer_seconds", res.Timings.TransferSeconds},
+		{"restore_seconds", res.Timings.RestoreSeconds},
+	} {
+		if err := validateTimingSeconds(t.field, t.seconds); err != nil {
+			return err
+		}
 	}
 	if res.Connection.Scheme == "" {
 		return crashf("provision payload: connection.scheme is empty")
 	}
 	return nil
+}
+
+// maxTimingSeconds bounds a reported phase duration so that its integer
+// millisecond form stays inside the evidence schema's safe-integer range
+// (|n| <= 2^53-1). It is ~285,000 years: the point is to exclude nonsense
+// a canonicalizer would refuse, not to judge how long a restore may take.
+const maxTimingSeconds = float64((1<<53 - 1) / 1000)
+
+// validateTimingSeconds rejects durations the record cannot represent.
+// NaN needs its own test: every comparison against NaN is false, so a
+// plain "< 0" guard passes it straight through to the record, where
+// int64(math.Round(NaN)) becomes the most negative int64 there is.
+func validateTimingSeconds(field string, seconds float64) error {
+	switch {
+	case math.IsNaN(seconds):
+		return crashf("provision payload: timings.%s is NaN", field)
+	case math.IsInf(seconds, 0):
+		return crashf("provision payload: timings.%s is infinite", field)
+	case seconds < 0:
+		return crashf("provision payload: negative timings (%s = %g)", field, seconds)
+	case seconds > maxTimingSeconds:
+		return crashf("provision payload: timings.%s (%g) exceeds what an evidence record can represent", field, seconds)
+	}
+	return nil
+}
+
+// normalizeCreatedAt converts the adapter's RFC 3339 instant — any
+// precision, any offset — into the evidence schema's UTC millisecond form
+// (§6.2). Sub-millisecond digits are truncated, never rounded: rounding up
+// would record a backup as newer than it is, and this value ends up in a
+// signed document an auditor may read. A nil value stays nil: "not
+// derivable" is a legitimate answer.
+func normalizeCreatedAt(created *string) (*string, error) {
+	if created == nil {
+		return nil, nil
+	}
+	ts, err := parseRFC3339(*created)
+	if err != nil {
+		return nil, crashf("provision payload: source_identity.created_at %q is not an RFC 3339 instant", *created)
+	}
+	normalized := ts.UTC().Truncate(time.Millisecond).Format(evidenceTimestampFormat)
+	return &normalized, nil
+}
+
+// parseRFC3339 accepts what RFC 3339 accepts, which is slightly more than
+// Go's time.RFC3339 layout: the standard allows lowercase "t" and "z"
+// designators, and docs/schemas/adapter/provision-response.json declares
+// them valid ([Tt], [Zz]). An adapter whose output validates against the
+// published schema must not be rejected here. RFC 3339 has no other
+// letters, so upper-casing is a safe way to reach the strict layout.
+func parseRFC3339(s string) (time.Time, error) {
+	ts, err := time.Parse(time.RFC3339, s)
+	if err == nil {
+		return ts, nil
+	}
+	return time.Parse(time.RFC3339, strings.ToUpper(s))
 }
 
 func normalizeState(state json.RawMessage) json.RawMessage {
