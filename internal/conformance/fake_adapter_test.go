@@ -35,6 +35,10 @@ func fakeMain(mode string) int {
 	} else {
 		signal.Notify(f.sig, syscall.SIGTERM)
 	}
+	if mode == "exit-before-read" {
+		// Never touches stdin: the driver's write has nowhere to go.
+		return 0
+	}
 	f.in = bufio.NewScanner(os.Stdin)
 	f.in.Buffer(make([]byte, 64*1024), maxLineBytes)
 	if !f.in.Scan() {
