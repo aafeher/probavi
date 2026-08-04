@@ -494,3 +494,28 @@ func TestVerifyEdgeCases(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := syncDir(filepath.Join(dir, "evidence.jsonl")); err != nil {
+		t.Errorf("syncDir on a real directory: %v", err)
+	}
+	if err := syncDir(filepath.Join(dir, "no-such-dir", "evidence.jsonl")); err == nil {
+		t.Error("syncDir on a missing directory must report it — the log cannot be durable there")
+	}
+}
+
+// TestOpenSurvivesAnUnsyncableDirectory keeps the durability step from
+// becoming a new way for a drill to fail: a store still opens on a
+// filesystem that cannot sync a directory, because refusing to run a drill
+// is worse than a weaker crash guarantee.
+func TestOpenSurvivesAnUnsyncableDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "evidence.jsonl")
+	st, err := Open(path, testSigner(), nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+}

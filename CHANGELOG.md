@@ -98,6 +98,17 @@ always called out explicitly.
   The separator is a dash, not a colon: these ids become Kubernetes label
   values, where a colon is invalid — a test pins the id against that shape
   so the constraint cannot be broken from a unit test's blind side.
+- The evidence log's directory entry is now flushed when the store opens.
+  Every append fsyncs the file, which promises its bytes reached the disk —
+  but the name pointing at those bytes lives in the parent directory, and
+  for a newly created log that entry could still be in cache. A crash there
+  lost the whole file, fsynced record and all: for an append-only log, the
+  proof that a drill ran at all.
+
+  One directory sync per drill, not per record. A filesystem that does not
+  support syncing a directory (EINVAL) is not a reason to refuse to run a
+  drill, so that one error is passed over; any other is reported rather
+  than a durability guarantee being claimed that the store cannot make.
 
 - Four small correctness items found during the audit:
 
