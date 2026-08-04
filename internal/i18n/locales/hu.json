@@ -29,6 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "a target.source.credential_env %q eleme nem érvényes környezeti változónév",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "a target.pitr pontosan egyet kér a target_time (RFC 3339, pl. \"2026-07-30T14:32:00Z\") és a target_age (pl. \"24h\") közül",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "a target.pitr.target_time (%q) nem RFC 3339 időbélyeg",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "a target.pitr.target_time (%q) a jövőben van — visszaállítást csak olyan időpontra lehet bizonyítani, amely már elmúlt",
   "sandbox.provider is required (e.g. \"docker\")": "a sandbox.provider megadása kötelező (pl. \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "a sandbox.timeout megadása kötelező — minden drillnek kemény falióra-korlát kell (pl. \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "legalább egy ellenőrzés szükséges (kezdd ezzel: \"- builtin: service_healthy\")",

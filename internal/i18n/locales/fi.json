@@ -29,6 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "target.source.credential_env-kohta %q ei ole kelvollinen ympäristömuuttujan nimi",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "target.pitr vaatii täsmälleen yhden näistä: target_time (RFC 3339, esim. \"2026-07-30T14:32:00Z\") tai target_age (esim. \"24h\")",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "target.pitr.target_time %q ei ole RFC 3339 -aikaleima",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "target.pitr.target_time %q on tulevaisuudessa — palautus voidaan todistaa vain hetkeen, joka on jo mennyt",
   "sandbox.provider is required (e.g. \"docker\")": "sandbox.provider vaaditaan (esim. \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "sandbox.timeout vaaditaan — jokainen harjoitus tarvitsee tiukan aikarajan (esim. \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "vähintään yksi tarkistus vaaditaan (aloita tarkistuksella \"- builtin: service_healthy\")",

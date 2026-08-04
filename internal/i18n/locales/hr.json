@@ -29,6 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "unos %q u target.source.credential_env nije valjano ime varijable okruženja",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "target.pitr zahtijeva točno jedno od target_time (RFC 3339, npr. \"2026-07-30T14:32:00Z\") ili target_age (npr. \"24h\")",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "target.pitr.target_time %q nije vremenska oznaka RFC 3339",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "target.pitr.target_time %q je u budućnosti — vraćanje se može dokazati samo do trenutka koji je već prošao",
   "sandbox.provider is required (e.g. \"docker\")": "polje sandbox.provider je obavezno (npr. \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "polje sandbox.timeout je obavezno — svaka vježba treba tvrdo vremensko ograničenje (npr. \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "potrebna je barem jedna provjera (počnite s \"- builtin: service_healthy\")",

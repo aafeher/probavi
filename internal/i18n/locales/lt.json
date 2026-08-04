@@ -29,6 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "target.source.credential_env įrašas %q nėra tinkamas aplinkos kintamojo vardas",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "target.pitr reikalauja lygiai vieno iš target_time (RFC 3339, pvz., \"2026-07-30T14:32:00Z\") arba target_age (pvz., \"24h\")",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "target.pitr.target_time %q nėra RFC 3339 laiko žyma",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "target.pitr.target_time %q yra ateityje — atkūrimą galima įrodyti tik iki jau praėjusios akimirkos",
   "sandbox.provider is required (e.g. \"docker\")": "laukas sandbox.provider yra privalomas (pvz., \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "laukas sandbox.timeout yra privalomas — kiekvienoms pratyboms reikia griežto laiko limito (pvz., \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "reikalinga bent viena patikra (pradėkite nuo \"- builtin: service_healthy\")",
