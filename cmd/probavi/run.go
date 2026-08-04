@@ -222,7 +222,7 @@ func wireDrill(configPath string, logger *slog.Logger, tr *i18n.T) (*core.Drill,
 	password := randomHex(16)
 	runner, err := adapter.New(cfg.Target.Adapter, logger, &adapter.Options{
 		CredentialEnv: cfg.Target.Source.CredentialEnv,
-		Env:           map[string]string{"PROBAVI_SANDBOX_PASSWORD": password},
+		Env:           map[string]string{adapter.SandboxPasswordEnv: password},
 	})
 	if err != nil {
 		if cerr := store.Close(); cerr != nil {

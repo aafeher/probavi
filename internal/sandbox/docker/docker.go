@@ -141,7 +141,7 @@ func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandb
 	if err != nil {
 		return nil, err
 	}
-	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin, args...)
+	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, nil, p.bin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("create sandbox: %w", err)
 	}
@@ -167,7 +167,7 @@ func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandb
 // runs. Containers of live processes (concurrent drills) are kept. Returns
 // the removed container ids.
 func (p *Provider) SweepOrphans(ctx context.Context) ([]string, error) {
-	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin, "ps", "-aq", "--filter", "label="+LabelSandbox+"=1")
+	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, nil, p.bin, "ps", "-aq", "--filter", "label="+LabelSandbox+"=1")
 	if err != nil {
 		return nil, fmt.Errorf("list sandbox containers: %w", err)
 	}
@@ -203,7 +203,7 @@ func (p *Provider) SweepOrphans(ctx context.Context) ([]string, error) {
 // malformed pid label counts as orphaned: the container carries our label
 // but lost its ownership metadata.
 func (p *Provider) isOrphan(ctx context.Context, id string) (bool, error) {
-	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin,
+	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, nil, p.bin,
 		"inspect", "-f", `{{ index .Config.Labels "`+labelHost+`" }}|{{ index .Config.Labels "`+labelPID+`" }}`, id)
 	if err != nil {
 		return false, fmt.Errorf("inspect %s: %w", id, err)
@@ -250,14 +250,20 @@ func (s *Sandbox) Exec(ctx context.Context, req sandbox.ExecRequest) (*sandbox.E
 	if len(req.Stdin) > 0 {
 		args = append(args, "-i")
 	}
+	// "-e NAME" without a value tells the docker CLI to take it from its own
+	// environment. The value therefore never enters any argv, where `ps`
+	// would show it to every local user — which is the same rule the check
+	// runner enforces when it refuses {{password}} in sql_runner argv.
+	childEnv := make([]string, 0, len(req.Env))
 	for _, k := range sortedKeys(req.Env) {
-		args = append(args, "-e", k+"="+req.Env[k])
+		args = append(args, "-e", k)
+		childEnv = append(childEnv, k+"="+req.Env[k])
 	}
 	args = append(args, s.id)
 	args = append(args, req.Argv...)
 
 	start := time.Now()
-	stdout, stderr, truncated, exit, err := s.p.run.Run(ctx, strings.NewReader(string(req.Stdin)), s.p.bin, args...)
+	stdout, stderr, truncated, exit, err := s.p.run.Run(ctx, strings.NewReader(string(req.Stdin)), childEnv, s.p.bin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("exec in sandbox %s: %w", s.id, err)
 	}
@@ -294,12 +300,12 @@ func (s *Sandbox) PutFile(ctx context.Context, hostPath, destPath, mode string) 
 	}
 
 	start := time.Now()
-	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin, "cp", hostPath, s.id+":"+destPath); err != nil {
+	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, nil, s.p.bin, "cp", hostPath, s.id+":"+destPath); err != nil {
 		return nil, fmt.Errorf("copy into sandbox %s: %w", s.id, err)
 	} else if exit != 0 {
 		return nil, fmt.Errorf("copy into sandbox %s: docker cp exited %d: %s", s.id, exit, firstLine(stderr))
 	}
-	stdout, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin,
+	stdout, stderr, _, exit, err := s.p.run.Run(ctx, nil, nil, s.p.bin,
 		"exec", s.id, "sh", "-c", `echo "$(id -u):$(id -g)"`)
 	if err != nil {
 		return nil, fmt.Errorf("resolve exec identity in sandbox %s: %w", s.id, err)
@@ -311,7 +317,7 @@ func (s *Sandbox) PutFile(ctx context.Context, hostPath, destPath, mode string) 
 	if !ownerPattern.MatchString(owner) {
 		return nil, fmt.Errorf("resolve exec identity in sandbox %s: unexpected id output %q", s.id, owner)
 	}
-	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin,
+	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, nil, s.p.bin,
 		"exec", "-u", "0", s.id,
 		"sh", "-c", `chown -R -- "$1" "$2" && chmod -- "$3" "$2"`, "sh", owner, destPath, mode); err != nil {
 		return nil, fmt.Errorf("apply ownership and mode in sandbox %s: %w", s.id, err)
@@ -332,7 +338,7 @@ func (s *Sandbox) Destroy(ctx context.Context) error {
 }
 
 func (p *Provider) remove(ctx context.Context, id string) error {
-	_, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin, "rm", "-f", "-v", id)
+	_, stderr, _, exit, err := p.run.Run(ctx, nil, nil, p.bin, "rm", "-f", "-v", id)
 	if err != nil {
 		return err
 	}
@@ -400,7 +406,7 @@ func (p *Provider) awaitRunning(ctx context.Context, id string) error {
 	ctx, cancel := context.WithTimeout(ctx, p.awaitCap)
 	defer cancel()
 	for {
-		stdout, _, _, exit, err := p.run.Run(ctx, nil, p.bin, "inspect", "-f", "{{.State.Running}}", id)
+		stdout, _, _, exit, err := p.run.Run(ctx, nil, nil, p.bin, "inspect", "-f", "{{.State.Running}}", id)
 		if err != nil {
 			return fmt.Errorf("await sandbox %s: %w", id, err)
 		}

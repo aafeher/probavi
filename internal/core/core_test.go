@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -497,16 +498,34 @@ func TestRunWithDefaultsAndCleanupFailures(t *testing.T) {
 }
 
 func TestResolvePassword(t *testing.T) {
-	d := &Drill{SandboxPassword: "generated"}
-	if got := d.resolvePassword(""); got != "" {
-		t.Errorf("empty password_env = %q", got)
-	}
-	if got := d.resolvePassword("PROBAVI_SANDBOX_PASSWORD"); got != "generated" {
-		t.Errorf("core-generated password_env = %q", got)
-	}
+	// The name comes from the adapter, so what it can reach must be the
+	// drill's declared allow-list and nothing else: password_env is a field
+	// for a database password, not a read primitive for the core's
+	// environment.
 	t.Setenv("PROBAVI_TEST_DB_PW", "inherited")
-	if got := d.resolvePassword("PROBAVI_TEST_DB_PW"); got != "inherited" {
-		t.Errorf("inherited password_env = %q", got)
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "not-for-the-adapter")
+
+	cfg := testConfig()
+	cfg.Target.Source.CredentialEnv = []string{"PROBAVI_TEST_DB_PW"}
+	d := &Drill{Config: cfg, SandboxPassword: "generated", Logger: slog.New(slog.DiscardHandler)}
+
+	tests := []struct {
+		name        string
+		passwordEnv string
+		want        string
+	}{
+		{"empty asks for nothing", "", ""},
+		{"the core's own ephemeral secret", adapter.SandboxPasswordEnv, "generated"},
+		{"a declared credential", "PROBAVI_TEST_DB_PW", "inherited"},
+		{"an undeclared variable is refused", "AWS_SECRET_ACCESS_KEY", ""},
+		{"an unset undeclared variable is refused too", "NOT_SET_ANYWHERE", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := d.resolvePassword(tt.passwordEnv); got != tt.want {
+				t.Errorf("resolvePassword(%q) = %q, want %q", tt.passwordEnv, got, tt.want)
+			}
+		})
 	}
 }
 

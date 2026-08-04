@@ -77,6 +77,28 @@ always called out explicitly.
 
 ### Fixed
 
+- **Security:** resolved database passwords no longer reach the docker
+  provider's command line. `internal/checks` refuses `{{password}}` in an
+  `sql_runner` argv template because "a password in argv would leak into
+  process listings" — and the provider then passed the value as
+  `docker exec -e NAME=value`, putting it in the drill host's process list
+  for every local user to read. The value now travels in the docker CLI's
+  own environment and only the variable's name appears in argv.
+
+  The k8s and remotehost providers still have this exposure: `kubectl exec`
+  has no environment flag and ssh's `SendEnv` depends on the server's
+  `AcceptEnv`. It is now declared in both providers' `Descriptor.Constraints`
+  and therefore in `docs/capabilities.json`, so the difference between the
+  providers is published rather than discovered. A fix is designed and
+  tracked separately.
+
+- **Security:** an adapter could name any environment variable of the core
+  process in `connection.password_env` and have its value handed to a
+  process it controls inside the sandbox — exfiltration through a field
+  meant for a database password. The name is now resolved against the same
+  allow-list the adapter's own environment is built from (protocol §2.5):
+  the core-generated ephemeral secret, or a variable the drill declared in
+  `source.credential_env`. Anything else resolves to empty and is logged.
 - Orphan detection was Linux-only, and releases ship macOS binaries. All
   three sandbox providers decided whether a sandbox's creating process was
   still running by stat-ing `/proc/<pid>`; on macOS that path does not

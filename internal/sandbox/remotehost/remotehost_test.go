@@ -26,13 +26,15 @@ type response struct {
 
 // fakeRunner scripts subprocess responses and records every invocation.
 type fakeRunner struct {
+	envs      [][]string
 	t         *testing.T
 	calls     [][]string
 	stdins    []string
 	responses []response
 }
 
-func (f *fakeRunner) Run(_ context.Context, stdin io.Reader, name string, args ...string) ([]byte, []byte, bool, int, error) {
+func (f *fakeRunner) Run(_ context.Context, stdin io.Reader, env []string, name string, args ...string) ([]byte, []byte, bool, int, error) {
+	f.envs = append(f.envs, env)
 	f.t.Helper()
 	in := ""
 	if stdin != nil {

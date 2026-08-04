@@ -24,6 +24,16 @@ const maxLineBytes = 4 << 20
 // defaultGrace is the SIGTERM→SIGKILL grace period (§2.4).
 const defaultGrace = 10 * time.Second
 
+// SandboxPasswordEnv names the ephemeral per-drill secret the core
+// generates and passes to the adapter (§2.5). An adapter that sets an
+// authenticated superuser password to this value references it back
+// through connection.password_env. The constant holds the variable's
+// NAME, never a secret: §2.5 exists so that values travel in the
+// environment while names travel in the protocol.
+//
+//nolint:gosec // G101 matches the identifier here, not a credential.
+const SandboxPasswordEnv = "PROBAVI_SANDBOX_PASSWORD"
+
 // Error codes from the protocol registry (§5) that this client emits or
 // callers commonly match on.
 const (
@@ -55,7 +65,7 @@ type Options struct {
 	// CredentialEnv names variables passed through from the core's own
 	// environment (drill config source.credential_env).
 	CredentialEnv []string
-	// Env sets explicit extra variables (e.g. PROBAVI_SANDBOX_PASSWORD).
+	// Env sets explicit extra variables (e.g. SandboxPasswordEnv).
 	// Values never appear in protocol messages or logs.
 	Env map[string]string
 	// Grace is the SIGTERM→SIGKILL period; default 10s.

@@ -16,6 +16,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -316,16 +317,28 @@ func (d *Drill) checkDeps(probe *adapter.ProbeResult, provRes *adapter.Provision
 }
 
 // resolvePassword turns a connection's password_env NAME into its value:
-// the core-generated ephemeral secret, or an inherited variable.
+// the core-generated ephemeral secret, or a variable the drill config
+// declared in source.credential_env.
+//
+// The name comes from the adapter, so the set of variables it may reach
+// has to be the same allow-list the adapter's own environment is built
+// from (protocol §2.5). Reading any variable the core process happens to
+// hold would let an adapter name, say, AWS_SECRET_ACCESS_KEY and have the
+// core hand it to a process the adapter controls inside the sandbox —
+// exfiltration through a field meant for a database password.
 func (d *Drill) resolvePassword(passwordEnv string) string {
-	switch passwordEnv {
-	case "":
+	switch {
+	case passwordEnv == "":
 		return ""
-	case "PROBAVI_SANDBOX_PASSWORD":
+	case passwordEnv == adapter.SandboxPasswordEnv:
 		return d.SandboxPassword
-	default:
+	case slices.Contains(d.Config.Target.Source.CredentialEnv, passwordEnv):
 		v, _ := os.LookupEnv(passwordEnv)
 		return v
+	default:
+		d.Logger.Warn("adapter asked for an environment variable the drill did not declare; password_env ignored",
+			"password_env", passwordEnv, "declared", d.Config.Target.Source.CredentialEnv)
+		return ""
 	}
 }
 

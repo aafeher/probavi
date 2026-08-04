@@ -94,6 +94,7 @@ var Descriptor = sandbox.Descriptor{
 		"Requires a working kubectl context with rights to create, exec into, and delete Jobs in the target namespace; the kubectl CLI is driven directly, never client-go.",
 		"Network isolation is the cluster's job: the pod carries the sandbox label so a NetworkPolicy can select it. There is no pod-level equivalent of the docker provider's --network none.",
 		"The pod runs with no service-account token, no service links, and the RuntimeDefault seccomp profile.",
+		"Per-command environment values (including a database password a check needs) are passed as `env NAME=value` in the exec command line, so they appear in the process list on the drill host and inside the pod. kubectl exec has no out-of-band environment channel; the docker provider does not have this exposure.",
 	},
 	VerifiedAgainst: []string{"kind cluster (CI integration suite)"},
 }
@@ -150,7 +151,7 @@ func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandb
 	if err != nil {
 		return nil, fmt.Errorf("encode job manifest: %w", err)
 	}
-	_, stderr, _, exit, err := p.run.Run(ctx, strings.NewReader(string(raw)),
+	_, stderr, _, exit, err := p.run.Run(ctx, strings.NewReader(string(raw)), nil,
 		p.bin, "create", "-n", namespace, "-f", "-")
 	if err != nil {
 		return nil, fmt.Errorf("create sandbox: %w", err)
@@ -179,7 +180,7 @@ func (p *Provider) Create(ctx context.Context, params map[string]string) (*Sandb
 // deadlines, because process liveness is only checkable locally. Returns
 // the removed ids as namespace/name.
 func (p *Provider) SweepOrphans(ctx context.Context) ([]string, error) {
-	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin,
+	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, nil, p.bin,
 		"get", "jobs", "--all-namespaces", "-l", LabelSandbox+"=1", "-o", "json")
 	if err != nil {
 		return nil, fmt.Errorf("list sandbox jobs: %w", err)
@@ -251,7 +252,7 @@ func (s *Sandbox) Exec(ctx context.Context, req sandbox.ExecRequest) (*sandbox.E
 	args = append(args, req.Argv...)
 
 	start := time.Now()
-	stdout, stderr, truncated, exit, err := s.p.run.Run(ctx, strings.NewReader(string(req.Stdin)), s.p.bin, args...)
+	stdout, stderr, truncated, exit, err := s.p.run.Run(ctx, strings.NewReader(string(req.Stdin)), nil, s.p.bin, args...)
 	if err != nil {
 		return nil, fmt.Errorf("exec in sandbox %s: %w", s.ID(), err)
 	}
@@ -288,14 +289,14 @@ func (s *Sandbox) PutFile(ctx context.Context, hostPath, destPath, mode string) 
 	}
 
 	start := time.Now()
-	if _, stderr, _, exit, err := s.p.run.Run(ctx, f, s.p.bin,
+	if _, stderr, _, exit, err := s.p.run.Run(ctx, f, nil, s.p.bin,
 		"exec", "-n", s.namespace, "-i", s.pod, "--",
 		"sh", "-c", `cat > "$1"`, "sh", destPath); err != nil {
 		return nil, fmt.Errorf("copy into sandbox %s: %w", s.ID(), err)
 	} else if exit != 0 {
 		return nil, fmt.Errorf("copy into sandbox %s: exited %d: %s", s.ID(), exit, firstLine(stderr))
 	}
-	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, s.p.bin,
+	if _, stderr, _, exit, err := s.p.run.Run(ctx, nil, nil, s.p.bin,
 		"exec", "-n", s.namespace, s.pod, "--", "chmod", mode, destPath); err != nil {
 		return nil, fmt.Errorf("chmod in sandbox %s: %w", s.ID(), err)
 	} else if exit != 0 {
@@ -316,7 +317,7 @@ func (s *Sandbox) Destroy(ctx context.Context) error {
 }
 
 func (p *Provider) remove(ctx context.Context, namespace, job string) error {
-	_, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin,
+	_, stderr, _, exit, err := p.run.Run(ctx, nil, nil, p.bin,
 		"delete", "job", "-n", namespace, job,
 		"--cascade=foreground", "--ignore-not-found")
 	if err != nil {
@@ -443,7 +444,7 @@ func (p *Provider) awaitRunning(ctx context.Context, sbx *Sandbox) error {
 // podStatus returns the Job's single pod name, phase, and — while waiting —
 // the container's waiting reason (e.g. ImagePullBackOff) for diagnostics.
 func (p *Provider) podStatus(ctx context.Context, sbx *Sandbox) (name, phase, reason string, err error) {
-	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, p.bin,
+	stdout, stderr, _, exit, err := p.run.Run(ctx, nil, nil, p.bin,
 		"get", "pods", "-n", sbx.namespace, "-l", "job-name="+sbx.job, "-o", "json")
 	if err != nil {
 		return "", "", "", fmt.Errorf("await sandbox %s: %w", sbx.ID(), err)
