@@ -134,3 +134,24 @@ func TestValidateRejects(t *testing.T) {
 		})
 	}
 }
+
+// TestTimingsValidateNamesAFixedField pins the diagnostic's determinism.
+// With several negative phases a map-ranged loop named a different one on
+// each run, which is a poor property for text a trust product prints and a
+// reader may be comparing between two logs.
+func TestTimingsValidateNamesAFixedField(t *testing.T) {
+	neg := int64(-1)
+	all := Timings{Provision: &neg, EngineReady: &neg, Transfer: &neg, Restore: &neg, Validate: &neg, Total: &neg}
+	first := all.validate()
+	if first == nil {
+		t.Fatal("negative timings must be rejected")
+	}
+	for range 50 {
+		if got := all.validate(); got.Error() != first.Error() {
+			t.Fatalf("diagnostic varies between runs: %v vs %v", got, first)
+		}
+	}
+	if !strings.Contains(first.Error(), "timings_ms.provision") {
+		t.Errorf("error = %v, want the first field in declaration order", first)
+	}
+}

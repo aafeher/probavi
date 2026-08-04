@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -565,5 +566,29 @@ func TestErrorString(t *testing.T) {
 	}
 	if c := crashf("x %d", 1); c.Code != CodeAdapterCrash || c.Message != "x 1" || c.Retryable {
 		t.Errorf("crashf = %+v", c)
+	}
+}
+
+// TestBuildEnvDeduplicates covers a credential named like a baseline
+// variable. Passing it twice would leave which one the adapter sees to
+// exec's last-wins rule instead of to the §2.5 allow-list.
+func TestBuildEnvDeduplicates(t *testing.T) {
+	t.Setenv("PATH", "/probavi-test-bin")
+	t.Setenv("PROBAVI_TEST_CRED", "secret")
+	r := &Runner{opts: Options{CredentialEnv: []string{"PATH", "PROBAVI_TEST_CRED", "PATH"}}}
+
+	env := r.buildEnv()
+	seen := map[string]int{}
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		seen[name]++
+	}
+	for name, n := range seen {
+		if n != 1 {
+			t.Errorf("%s appears %d times in the adapter environment", name, n)
+		}
+	}
+	if !slices.Contains(env, "PATH=/probavi-test-bin") || !slices.Contains(env, "PROBAVI_TEST_CRED=secret") {
+		t.Errorf("env = %v, want both variables present once", env)
 	}
 }
