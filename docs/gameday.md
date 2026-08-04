@@ -17,6 +17,10 @@ executed in dependency order: restore the auth database before the
 application database that cannot start without it, and measure the
 end-to-end wall clock of the whole exercise.
 
+Game-days are part of the Apache-2.0 core and free forever, with no
+member limit — the open-core line runs at the organisational layer
+(ROADMAP.md Phase 3), never at how many databases one exercise proves.
+
 1. **A member is exactly a drill.** Each member references a normal drill
    configuration file and runs through the identical pipeline as
    `probavi run` — sandbox, restore, checks, one signed evidence record,
