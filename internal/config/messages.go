@@ -21,6 +21,7 @@ const (
 	msgCredentialEnvName    = "target.source.credential_env entry %q is not a valid environment variable name"
 	msgPITRExactlyOne       = `target.pitr requires exactly one of target_time (RFC 3339, e.g. "2026-07-30T14:32:00Z") or target_age (e.g. "24h")`
 	msgPITRBadTargetTime    = "target.pitr.target_time %q is not an RFC 3339 timestamp"
+	msgPITRFutureTargetTime = "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed"
 	msgProviderRequired     = `sandbox.provider is required (e.g. "docker")`
 	msgTimeoutRequired      = `sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. "30m")`
 	msgChecksRequired       = `at least one check is required (start with "- builtin: service_healthy")`
@@ -88,6 +89,7 @@ func Messages() []string {
 		msgCredentialEnvName,
 		msgPITRExactlyOne,
 		msgPITRBadTargetTime,
+		msgPITRFutureTargetTime,
 		msgProviderRequired,
 		msgTimeoutRequired,
 		msgChecksRequired,

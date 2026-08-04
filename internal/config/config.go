@@ -288,9 +288,22 @@ func (pt *PITR) validate(p *problems) {
 			p.add(msgPITRBadTargetTime, pt.TargetTime)
 			return
 		}
+		if ts.After(time.Now().Add(pitrClockSkewGrace)) {
+			p.add(msgPITRFutureTargetTime, pt.TargetTime)
+			return
+		}
 		pt.parsedTime = ts
 	}
 }
+
+// pitrClockSkewGrace is how far ahead of this host's clock a target_time
+// may sit before it is called a mistake. A drill can only prove recovery
+// to an instant that has happened; an engine handed a future target simply
+// recovers as far as it can, so the config is asking for something other
+// than what it says. The grace absorbs ordinary skew between the host that
+// wrote the config and the one running the drill, without letting through
+// the mistake this catches — a year or a month typed wrong.
+const pitrClockSkewGrace = time.Minute
 
 // Resolve returns the absolute recovery target: the validated target_time,
 // or now minus target_age. Only meaningful on a Config returned by Load.
