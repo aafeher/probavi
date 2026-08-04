@@ -293,7 +293,7 @@
         "Requires a working kubectl context with rights to create, exec into, and delete Jobs in the target namespace; the kubectl CLI is driven directly, never client-go.",
         "Network isolation is the cluster's job: the pod carries the sandbox label so a NetworkPolicy can select it. There is no pod-level equivalent of the docker provider's --network none.",
         "The pod runs with no service-account token, no service links, and the RuntimeDefault seccomp profile.",
-        "Per-command environment values (including a database password a check needs) are passed as `env NAME=value` in the exec command line, so they appear in the process list on the drill host and inside the pod. kubectl exec has no out-of-band environment channel; the docker provider does not have this exposure."
+        "Per-command environment values reach the command through stdin, never the command line: kubectl exec has no environment flag, and a value in argv would be readable from the process list on the drill host and inside the pod. Requires sh in the image, as put_file already does."
       ],
       "verified_against": [
         "kind cluster (CI integration suite)"
@@ -337,7 +337,7 @@
         "systemd 244 or newer on the target, probed at first contact.",
         "Engine and tool versions are whatever the target host has installed; the version match a sandbox image guarantees does not apply here.",
         "Requires the right to run transient systemd units as the drill user — the polkit rule the README ships.",
-        "Per-command environment values (including a database password a check needs) are passed as `env NAME=value` in the remote command line, so they appear in the process list on both the drill host and the target. ssh has no out-of-band environment channel that does not depend on the server's AcceptEnv; the docker provider does not have this exposure.",
+        "Per-command environment values reach the command through stdin, never the remote command line: ssh has no environment channel independent of the target's AcceptEnv, and a value in argv would be readable from the process list on both hosts.",
         "The target is named by the PROBAVI_SSH_TARGET environment variable only, never in drill config: sandbox params are recorded verbatim in signed evidence, and connection details must never appear there."
       ],
       "verified_against": [
