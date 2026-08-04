@@ -77,6 +77,19 @@ always called out explicitly.
 
 ### Fixed
 
+- A cancelled drill is now recorded as `cancelled`. `classify` mapped only
+  `context.DeadlineExceeded` to a verdict, so Ctrl-C or SIGTERM produced
+  whatever the dying adapter last managed to say — usually
+  `adapter_crash`. The signed record therefore blamed a third party's
+  adapter for the operator's own interrupt, in a document written to be
+  read by an auditor, and `ROADMAP.md`'s "SIGTERM → cancelled record" was
+  not true of any adapter that did not catch the signal in time.
+
+  The drill's context now outranks the adapter's parting words in both
+  directions: a deadline is a `timeout`, a cancellation is `cancelled`, and
+  the adapter's message is kept inside the record either way. Teardown is
+  told the matching reason, as the protocol §6.4 vocabulary expects.
+
 - `probavi adapter conformance` could abort with a harness error instead of
   reporting verdicts. The driver treated **any** stdin write failure as a
   suite-side failure, so an adapter that exited before the request landed —
