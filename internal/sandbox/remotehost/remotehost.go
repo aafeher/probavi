@@ -158,6 +158,10 @@ type Provider struct {
 
 	target        string
 	workspaceRoot string
+
+	// alive reports whether a sandbox's creating process still runs. Injected
+	// so the sweep's decision can be tested without spawning processes.
+	alive func(pid int) bool
 }
 
 // New returns a Provider for the target named by PROBAVI_SSH_TARGET. The
@@ -187,6 +191,7 @@ func New(logger *slog.Logger, params map[string]string) (*Provider, error) {
 		hostID:        sandbox.HostID(),
 		target:        target,
 		workspaceRoot: set.root,
+		alive:         sandbox.ProcessAlive,
 	}, nil
 }
 
@@ -425,10 +430,7 @@ func (p *Provider) isOrphan(ctx context.Context, name string) (bool, error) {
 		if err != nil || pid <= 0 {
 			return true, nil
 		}
-		if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err != nil {
-			return true, nil
-		}
-		return false, nil
+		return !p.alive(pid), nil
 	}
 }
 

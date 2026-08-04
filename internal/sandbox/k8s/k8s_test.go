@@ -69,6 +69,7 @@ func testProvider(t *testing.T, responses ...response) (*Provider, *fakeRunner) 
 		hostID:        "abcd1234abcd1234",
 		awaitInterval: time.Millisecond,
 		awaitCap:      50 * time.Millisecond,
+		alive:         sandbox.ProcessAlive,
 	}, fake
 }
 
@@ -80,6 +81,9 @@ func TestNewDefaults(t *testing.T) {
 	p := New(nil)
 	if p.bin != "kubectl" || p.run == nil || p.logger == nil {
 		t.Errorf("New: %+v, want kubectl binary with runner and logger", p)
+	}
+	if p.alive == nil {
+		t.Error("New: alive is nil — the orphan sweep would panic on its first labeled Job")
 	}
 	if len(p.hostID) != 16 {
 		t.Errorf("hostID = %q, want 16 hex chars", p.hostID)
@@ -559,5 +563,46 @@ func TestManifestRejectsUnhandledDeclaredParam(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "declared but not implemented") {
 		t.Errorf("error %q does not explain the defect", err)
+	}
+}
+
+// TestSweepAsksTheOwnerLivenessCheck is the k8s half of the portability
+// fix: see the docker provider's test of the same name. A stat of
+// /proc/<pid> answered "gone" for every pid on a macOS drill host, so a
+// concurrent drill's Job was deleted mid-restore.
+func TestSweepAsksTheOwnerLivenessCheck(t *testing.T) {
+	tests := []struct {
+		name        string
+		alive       bool
+		wantRemoved []string
+	}{
+		{"live owner is spared", true, nil},
+		{"dead owner is swept", false, []string{"a/job1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, fake := testProvider(t)
+			list := `{"items":[` + sweepJobJSON("job1", "a", p.hostID, "4242") + `]}`
+			fake.responses = []response{{stdout: list}, {}}
+			asked := 0
+			p.alive = func(pid int) bool {
+				asked++
+				if pid != 4242 {
+					t.Errorf("liveness asked about pid %d, want the label's 4242", pid)
+				}
+				return tt.alive
+			}
+
+			removed, err := p.SweepOrphans(context.Background())
+			if err != nil {
+				t.Fatalf("SweepOrphans: %v", err)
+			}
+			if !slices.Equal(removed, tt.wantRemoved) {
+				t.Errorf("removed = %v, want %v", removed, tt.wantRemoved)
+			}
+			if asked != 1 {
+				t.Errorf("liveness asked %d times, want exactly 1", asked)
+			}
+		})
 	}
 }

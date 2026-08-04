@@ -77,6 +77,27 @@ always called out explicitly.
 
 ### Fixed
 
+- Orphan detection was Linux-only, and releases ship macOS binaries. All
+  three sandbox providers decided whether a sandbox's creating process was
+  still running by stat-ing `/proc/<pid>`; on macOS that path does not
+  exist, so the check failed for every pid and **every labeled sandbox
+  looked orphaned**. Since the sweep runs at the start of every drill, a
+  starting drill destroyed the running sandbox of any concurrent one on the
+  same host — including parallel game-day members — mid-restore. The
+  docker provider's own comment promised the opposite.
+
+  Liveness is now decided by signalling the process with signal 0, which
+  delivers nothing and only asks the kernel whether the pid exists and
+  whether we may signal it. `EPERM` counts as alive: a process owned by
+  another user is running, and treating "may not signal" as "gone" is the
+  destructive answer. The check lives in `internal/sandbox` behind an
+  injectable seam, so each provider's sweep decision is now unit-tested for
+  both answers instead of depending on the host's filesystem layout.
+
+  Unchanged: a recycled pid still looks alive, so an orphan can survive
+  until its pid is free. That errs toward leaving a sandbox behind rather
+  than destroying a live one.
+
 - A drill whose composed record the store refused now leaves a **degraded
   record** instead of nothing (`docs/evidence-schema.md` §7.1, new). §7 has
   always required that every started drill end in exactly one appended,

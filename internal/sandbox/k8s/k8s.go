@@ -108,6 +108,10 @@ type Provider struct {
 
 	awaitInterval time.Duration
 	awaitCap      time.Duration
+
+	// alive reports whether a sandbox's creating process still runs. Injected
+	// so the sweep's decision can be tested without spawning processes.
+	alive func(pid int) bool
 }
 
 // New returns a Provider shelling out to the "kubectl" binary.
@@ -123,6 +127,7 @@ func New(logger *slog.Logger) *Provider {
 		hostID:        sandbox.HostID(),
 		awaitInterval: awaitInterval,
 		awaitCap:      maxAwaitRunning,
+		alive:         sandbox.ProcessAlive,
 	}
 }
 
@@ -213,10 +218,7 @@ func (p *Provider) isOrphan(labels map[string]string) bool {
 	if err != nil || pid <= 0 {
 		return true
 	}
-	if _, err := os.Stat(fmt.Sprintf("/proc/%d", pid)); err != nil {
-		return true
-	}
-	return false
+	return !p.alive(pid)
 }
 
 // ID returns namespace/job-name.
