@@ -29,6 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "η καταχώριση %q στο target.source.credential_env δεν είναι έγκυρο όνομα μεταβλητής περιβάλλοντος",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "το target.pitr απαιτεί ακριβώς ένα από τα target_time (RFC 3339, π.χ. \"2026-07-30T14:32:00Z\") ή target_age (π.χ. \"24h\")",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "το target.pitr.target_time %q δεν είναι χρονοσφραγίδα RFC 3339",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "το target.pitr.target_time %q βρίσκεται στο μέλλον — η αποκατάσταση μπορεί να αποδειχθεί μόνο σε χρονική στιγμή που έχει ήδη παρέλθει",
   "sandbox.provider is required (e.g. \"docker\")": "απαιτείται το sandbox.provider (π.χ. \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "απαιτείται το sandbox.timeout — κάθε άσκηση χρειάζεται αυστηρό χρονικό όριο (π.χ. \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "απαιτείται τουλάχιστον ένας έλεγχος (ξεκινήστε με \"- builtin: service_healthy\")",

@@ -29,6 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "ieraksts %q laukā target.source.credential_env nav derīgs vides mainīgā nosaukums",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "target.pitr prasa tieši vienu no target_time (RFC 3339, piem., \"2026-07-30T14:32:00Z\") vai target_age (piem., \"24h\")",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "target.pitr.target_time %q nav RFC 3339 laikspiedols",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "target.pitr.target_time %q ir nākotnē — atjaunošanu var pierādīt tikai līdz brīdim, kas jau ir pagājis",
   "sandbox.provider is required (e.g. \"docker\")": "lauks sandbox.provider ir obligāts (piem., \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "lauks sandbox.timeout ir obligāts — katrām mācībām nepieciešams stingrs izpildes laika ierobežojums (piem., \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "nepieciešama vismaz viena pārbaude (sāciet ar \"- builtin: service_healthy\")",

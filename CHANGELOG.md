@@ -86,6 +86,21 @@ always called out explicitly.
   format verbs. It is not the native-speaker review `docs/i18n.md` §5 asks
   for, and that one is still owed; what it found is recorded as follow-up
   work rather than acted on where the call belongs to a native speaker.
+- A `target.pitr.target_time` in the future is refused at config load. A
+  drill can only prove recovery to an instant that has happened; an engine
+  handed a future target simply recovers as far as it can, so the drill
+  quietly proved something other than what the config asked for. The usual
+  cause is a typed year or month, and catching it before a sandbox exists
+  costs nothing.
+
+  Targets within a minute of now are accepted, so ordinary clock skew
+  between the host that wrote the config and the one running the drill
+  cannot fail a drill.
+
+  The diagnostic is translated into all 23 locale catalogs, as the gates of
+  `docs/i18n.md` §4 require. **The 22 non-Hungarian translations ship
+  without a native-speaker review pass** (§5); that review is owed, and
+  corrections will follow.
 
 - A recycled pid no longer makes a dead sandbox owner look alive. The
   orphan sweep decided ownership from the pid alone, so when the process

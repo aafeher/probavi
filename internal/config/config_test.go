@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,4 +283,57 @@ func TestScalarNormalization(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPITRRejectsAFutureTarget covers the one point-in-time target that
+// cannot be proven. An engine handed a future instant simply recovers as
+// far as it can, so the drill would quietly prove something other than
+// what the config asked for — and the usual cause is a typed year or
+// month, which is worth catching before a sandbox exists.
+func TestPITRRejectsAFutureTarget(t *testing.T) {
+	tests := []struct {
+		name       string
+		targetTime string
+		wantErr    bool
+	}{
+		{"a past instant is fine", "2020-07-30T14:32:00Z", false},
+		{"a mistyped year is refused", "2999-07-30T14:32:00Z", true},
+		{"an offset that resolves to the past is fine", "2020-07-30T16:32:00+02:00", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &problems{tr: i18n.English()}
+			(&PITR{TargetTime: tt.targetTime}).validate(p)
+			err := errors.Join(p.errs...)
+			switch {
+			case tt.wantErr && err == nil:
+				t.Error("a future target must be refused at load, before any sandbox exists")
+			case !tt.wantErr && err != nil:
+				t.Errorf("unexpected rejection: %v", err)
+			case tt.wantErr && !strings.Contains(err.Error(), "in the future"):
+				t.Errorf("error = %v, want it to say the target is in the future", err)
+			}
+		})
+	}
+
+	t.Run("ordinary clock skew is absorbed", func(t *testing.T) {
+		// A config written on a host whose clock runs slightly ahead must
+		// not fail a drill; only a target far enough ahead to be a mistake
+		// is refused.
+		skewed := time.Now().Add(pitrClockSkewGrace / 2).UTC().Format(time.RFC3339)
+		p := &problems{tr: i18n.English()}
+		(&PITR{TargetTime: skewed}).validate(p)
+		if err := errors.Join(p.errs...); err != nil {
+			t.Errorf("target %q within the skew grace was refused: %v", skewed, err)
+		}
+	})
+
+	t.Run("a refused target leaves nothing resolvable", func(t *testing.T) {
+		pt := &PITR{TargetTime: "2999-07-30T14:32:00Z"}
+		p := &problems{tr: i18n.English()}
+		pt.validate(p)
+		if !pt.parsedTime.IsZero() {
+			t.Error("a rejected target_time must not be cached for Resolve")
+		}
+	})
 }

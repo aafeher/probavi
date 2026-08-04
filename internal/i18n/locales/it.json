@@ -29,6 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "la voce %q di target.source.credential_env non è un nome valido di variabile d'ambiente",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "target.pitr richiede esattamente uno tra target_time (RFC 3339, ad es. \"2026-07-30T14:32:00Z\") e target_age (ad es. \"24h\")",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "target.pitr.target_time %q non è un timestamp RFC 3339",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "target.pitr.target_time %q è nel futuro — un ripristino può essere dimostrato solo fino a un istante già trascorso",
   "sandbox.provider is required (e.g. \"docker\")": "sandbox.provider è obbligatorio (ad es. \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "sandbox.timeout è obbligatorio — ogni esercitazione ha bisogno di un limite di tempo rigido (ad es. \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "è richiesta almeno una verifica (iniziare con \"- builtin: service_healthy\")",

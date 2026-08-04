@@ -29,6 +29,7 @@
   "target.source.credential_env entry %q is not a valid environment variable name": "l-entrata %q f'target.source.credential_env mhijiex isem validu ta' varjabbli tal-ambjent",
   "target.pitr requires exactly one of target_time (RFC 3339, e.g. \"2026-07-30T14:32:00Z\") or target_age (e.g. \"24h\")": "target.pitr jeħtieġ eżattament wieħed minn target_time (RFC 3339, eż. \"2026-07-30T14:32:00Z\") jew target_age (eż. \"24h\")",
   "target.pitr.target_time %q is not an RFC 3339 timestamp": "target.pitr.target_time %q mhijiex marka tal-ħin RFC 3339",
+  "target.pitr.target_time %q is in the future — a restore can only be proven to an instant that has already passed": "target.pitr.target_time %q qiegħed fil-futur — restawr jista' jiġi ppruvat biss sa mument li diġà għadda",
   "sandbox.provider is required (e.g. \"docker\")": "il-qasam sandbox.provider huwa meħtieġ (eż. \"docker\")",
   "sandbox.timeout is required — every drill needs a hard wall-clock limit (e.g. \"30m\")": "il-qasam sandbox.timeout huwa meħtieġ — kull eżerċizzju jeħtieġ limitu strett tal-ħin totali (eż. \"30m\")",
   "at least one check is required (start with \"- builtin: service_healthy\")": "huwa meħtieġ mill-inqas kontroll wieħed (ibda bi \"- builtin: service_healthy\")",
