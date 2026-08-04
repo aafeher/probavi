@@ -53,6 +53,28 @@ always called out explicitly.
 
   `@latest` keeps working and stays the recommended default for casual use.
 
+### Changed
+
+- **Specs:** `docs/adapter-protocol.md` §6.2 and `docs/evidence-schema.md`
+  §3 now state the `created_at` contract that neither of them carried: the
+  adapter may report any RFC 3339 instant, and the core converts it to the
+  evidence record's UTC millisecond form by truncation — never rounding, so
+  a backup is never recorded as newer than it is. An unparseable value is
+  an `adapter_crash` verdict, never a lost record.
+
+  The gap was real and reachable: the evidence schema requires exactly
+  millisecond precision, the protocol required nothing, the protocol's own
+  example showed a second-precision instant, and `probavi adapter
+  conformance` accepts any RFC 3339 — so a third-party adapter could pass
+  "15/15 conformant" and then end every drill with "evidence record could
+  not be written" after a successful restore. The four in-repo adapters
+  already emit the millisecond form, which is why CI never saw it.
+
+  No wire change and no version bump for either contract: nothing required
+  of adapters is tightened, and no adapter that conforms today stops
+  conforming. The core-side normalization that makes this true is a
+  separate change.
+
 ### Fixed
 
 - The open-core boundary in `ROADMAP.md` said "proving a **single drill**
