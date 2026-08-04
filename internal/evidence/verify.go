@@ -90,20 +90,60 @@ type walkState struct {
 // skipped without advancing the chain.
 func walk(r io.Reader, keyring Keyring) (*walkState, error) {
 	w := &walkState{keyring: keyring, nextSeq: 1, prevHash: GenesisPrevHash}
-	br := bufio.NewReaderSize(r, 64*1024)
+	br := bufio.NewReaderSize(r, readChunkBytes)
 	for lineNo := 1; ; lineNo++ {
-		line, err := br.ReadBytes('\n')
-		if errors.Is(err, io.EOF) {
+		line, terminated, tooLong, err := readLine(br, MaxRecordBytes)
+		switch {
+		case tooLong:
+			w.invalid(lineNo, ErrRecordTooLarge.Error())
+			return w, nil
+		case err != nil && !errors.Is(err, io.EOF):
+			return nil, fmt.Errorf("read evidence log: %w", err)
+		case !terminated:
 			if len(line) > 0 {
 				w.damaged = append(w.damaged, lineNo) // torn tail, no newline
 			}
 			return w, nil
 		}
-		if err != nil {
-			return nil, fmt.Errorf("read evidence log: %w", err)
-		}
-		if !w.step(bytes.TrimSuffix(line, []byte("\n")), lineNo) {
+		if !w.step(line, lineNo) {
 			return w, nil
+		}
+	}
+}
+
+// readChunkBytes is how much of a line the reader holds at once; a line may
+// span several chunks up to the caller's cap.
+const readChunkBytes = 64 * 1024
+
+// readLine reads one newline-terminated line while refusing to buffer more
+// than max bytes, and reports whether a terminator was seen and whether the
+// cap was exceeded.
+//
+// The cap is the point. A log is untrusted input by design — `probavi
+// evidence verify` and the independent verifier exist so that someone can
+// check a log they were handed — and reading a line into memory before
+// applying §4's size rule would let a file with no newline in it exhaust
+// the machine's memory long before the rule ran. The rule now bounds the
+// read itself.
+func readLine(br *bufio.Reader, max int) (line []byte, terminated, tooLong bool, err error) {
+	var buf []byte
+	for {
+		chunk, rerr := br.ReadSlice('\n')
+		if len(buf)+len(chunk) > max {
+			// Over the cap: the verdict is already decided, so the rest of
+			// the line is never read.
+			return nil, false, true, nil
+		}
+		buf = append(buf, chunk...) // ReadSlice's slice dies at the next read
+		switch {
+		case rerr == nil:
+			return bytes.TrimSuffix(buf, []byte("\n")), true, false, nil
+		case errors.Is(rerr, bufio.ErrBufferFull):
+			continue
+		case errors.Is(rerr, io.EOF):
+			return buf, false, false, io.EOF
+		default:
+			return nil, false, false, rerr
 		}
 	}
 }
@@ -136,9 +176,6 @@ func (w *walkState) step(line []byte, lineNo int) bool {
 // invalid (nil record, stop), or a parsed record in canonical form, returned
 // both as a struct and as the decoded generic object.
 func (w *walkState) parseCanonical(line []byte, lineNo int) (*Record, map[string]any, bool) {
-	if len(line) > MaxRecordBytes {
-		return nil, nil, w.invalid(lineNo, ErrRecordTooLarge.Error())
-	}
 	v, err := decodeStrict(line)
 	if err != nil {
 		w.damaged = append(w.damaged, lineNo)

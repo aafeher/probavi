@@ -77,6 +77,23 @@ always called out explicitly.
 
 ### Fixed
 
+- Both evidence verifiers read a log line into memory before applying the
+  §4 size ceiling, so a file containing no newline at all was bounded only
+  by the machine's memory. That is a poor property for the one part of
+  Probavi designed to be pointed at a file someone else produced: `probavi
+  evidence verify` and the standalone `probavi-evidence-verify` exist so an
+  auditor can check a log they were handed.
+
+  The size rule now bounds the read itself, in both implementations,
+  written separately as the two-implementation rule requires: a line past
+  the ceiling is an INVALID verdict at that line number and its remaining
+  bytes are never gathered. Verdicts and line numbering are unchanged for
+  every log that was valid before.
+
+  The record-level size checks that used to sit after parsing are gone with
+  it — the boundary that enforces the rule is now the read, and keeping a
+  second, unreachable copy of it would be a branch no test could enter.
+
 - `probavi adapter conformance` could abort with a harness error instead of
   reporting verdicts. The driver treated **any** stdin write failure as a
   suite-side failure, so an adapter that exited before the request landed —

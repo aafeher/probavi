@@ -90,6 +90,29 @@ func ParsePublicKey(data []byte) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(raw), nil
 }
 
+// readCappedLine reads one line, including its terminator, and stops as
+// soon as it is longer than a record may be (§4). It reports that as
+// oversized rather than returning the bytes.
+//
+// This tool's whole purpose is to be run by someone who did not produce the
+// log: an auditor, an insurer, anyone handed a file. Buffering a line
+// before applying the size rule would let a file containing no newline at
+// all exhaust the machine's memory before any rule ran, which is a poor
+// property for the program whose job is to survive hostile input.
+func readCappedLine(br *bufio.Reader) (line []byte, oversized bool, err error) {
+	for {
+		chunk, rerr := br.ReadSlice('\n')
+		if len(line)+len(chunk) > maxCanonicalBytes+1 { // +1 for the newline
+			return nil, true, nil
+		}
+		line = append(line, chunk...) // the slice is only valid until the next read
+		if errors.Is(rerr, bufio.ErrBufferFull) {
+			continue
+		}
+		return line, false, rerr
+	}
+}
+
 // Verify runs the §9 algorithm over a log and reports the verdict. The error
 // return covers only I/O failures reading r; a log that fails verification
 // is a Result, not an error.
@@ -100,9 +123,17 @@ func Verify(r io.Reader, keys Keyring) (Result, error) {
 
 	br := bufio.NewReader(r)
 	for lineNo := 1; ; lineNo++ {
-		raw, err := br.ReadBytes('\n')
+		raw, oversized, err := readCappedLine(br)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return Result{}, fmt.Errorf("read log: %w", err)
+		}
+		// §4 caps a record; a line past that cap is not one, and saying so
+		// costs nothing because the bytes were never gathered.
+		if oversized {
+			res.Status = StatusInvalid
+			res.Reason = fmt.Sprintf("line exceeds the %d byte limit of §4", maxCanonicalBytes)
+			res.Line = lineNo
+			return res, nil
 		}
 		if len(raw) == 0 {
 			break
@@ -156,9 +187,10 @@ func verifyRecord(rec map[string]any, line []byte, keys Keyring, expectedPrev st
 	if err != nil {
 		return err.Error()
 	}
-	if len(canon) > maxCanonicalBytes {
-		return fmt.Sprintf("canonical size %d exceeds the %d byte limit", len(canon), maxCanonicalBytes)
-	}
+	// §4's size ceiling is enforced by readCappedLine, before a line is
+	// ever gathered: a stored line that reaches this point is already
+	// within it, and no canonical form is longer than the bytes it was
+	// parsed from. Re-checking here would be an untestable branch.
 	if !bytes.Equal(canon, line) {
 		return "stored bytes are not the canonical serialization of the record"
 	}
