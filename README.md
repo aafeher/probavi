@@ -1,5 +1,8 @@
 # Probavi
 
+**English** · [Magyar](README.hu.md) · [Deutsch](README.de.md) · [Français](README.fr.md) · [Español](README.es.md)
+
+<!-- i18n:intro:start -->
 *Probavi* — Latin for **"I have proven."** The perfect tense is the point: not "we test restores", but "this restore was performed and proven, here is the signed record."
 
 **You have backups. But when did you last prove they restore?**
@@ -17,10 +20,11 @@ The output is not a green checkmark. It is an auditable, cryptographically verif
 - The "backup completed successfully" log line proves almost nothing. Backups fail silently: corruption, missing WAL segments, version mismatches, lost encryption keys, wrong databases backed up for months.
 - Regulations increasingly require *tested and documented* recovery capability, not just backups (see EU DORA, NIS2, and NIST contingency-planning guidance).
 - Cloud providers offer restore testing for their own managed services. If you run databases on your own VMs, bare metal, or a mixed estate, there is no neutral, open tool that does this for you. Probavi is that tool.
+<!-- i18n:intro:end -->
 
 ## Status
 
-**Pre-alpha, working end to end for PostgreSQL, MySQL, MongoDB, and SQL Server.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`, `mongodump` archives), native SQL Server `.bak` files, and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative and frozen, with machine-readable JSON Schemas in [docs/schemas/](docs/schemas/); third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. What exactly ships, in machine-readable form, is [docs/capabilities.json](docs/capabilities.json): generated from the code that implements each capability, regenerated and diff-checked by CI, and the source anything republishing Probavi's capabilities should read instead of this paragraph ([contract](docs/capabilities.md)). Released as **v0.1.0**: reproducible binaries for Linux and macOS (amd64/arm64) with checksums on the [releases page](https://github.com/probavi/probavi/releases) — pre-1.0, minor versions may break, every change is in [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
+**Pre-alpha, working end to end for PostgreSQL, MySQL, MongoDB, and SQL Server.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`, `mongodump` archives), native SQL Server `.bak` files, and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container or Kubernetes Job), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative and frozen, with machine-readable JSON Schemas in [docs/schemas/](docs/schemas/); third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. What exactly ships, in machine-readable form, is [docs/capabilities.json](docs/capabilities.json): generated from the code that implements each capability, regenerated and diff-checked by CI, and the source anything republishing Probavi's capabilities should read instead of this paragraph ([contract](docs/capabilities.md)). Released as **v0.2.0**: reproducible binaries for Linux and macOS (amd64/arm64) with checksums on the [releases page](https://github.com/probavi/probavi/releases) — pre-1.0, minor versions may break, every change is in [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
 
 ## Shape
 
@@ -266,9 +270,11 @@ The CLI speaks English by default and is localizable (`docs/i18n.md`): set `PROB
 - **Sandboxes are pluggable.** Docker containers and Kubernetes Jobs today, remote hosts later. The core only asks for "a disposable runtime".
 - **Evidence is the product.** Every run appends a hash-chained, ed25519-signed record. History cannot be silently rewritten, and third parties can verify it without trusting your dashboard.
 
+<!-- i18n:non-goals:start -->
 ## Non-goals
 
 Probavi will **not**: take backups, implement its own scheduler, manage database credentials beyond what a drill needs, or attempt to be a monitoring platform. Small core, sharp purpose.
+<!-- i18n:non-goals:end -->
 
 ## Contributing
 
