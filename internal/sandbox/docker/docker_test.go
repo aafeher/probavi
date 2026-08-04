@@ -578,6 +578,9 @@ func assertExecCall(t *testing.T, fake *fakeRunner) {
 	}
 	if fake.stdins[0] != "stdin-data" {
 		t.Errorf("stdin = %q, want stdin-data", fake.stdins[0])
+	}
+}
+
 // TestSweepAsksTheOwnerLivenessCheck pins the decision the sweep used to
 // get wrong off Linux. The old implementation stat'ed /proc/<pid>, which
 // does not exist on macOS — where Probavi also ships binaries — so every
