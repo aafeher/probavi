@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -340,12 +341,25 @@ func happyPathProblem(res *opResult, pr *provisionResult) string {
 	if len(pr.State) == 0 || json.Unmarshal(pr.State, &state) != nil {
 		return "state must be a JSON object (§6.2)"
 	}
-	if pr.SourceIdentity.CreatedAt != nil {
-		if _, err := time.Parse(time.RFC3339, *pr.SourceIdentity.CreatedAt); err != nil {
-			return fmt.Sprintf("created_at %q must be null or RFC 3339", *pr.SourceIdentity.CreatedAt)
-		}
+	if pr.SourceIdentity.CreatedAt != nil && !isRFC3339(*pr.SourceIdentity.CreatedAt) {
+		return fmt.Sprintf("created_at %q must be null or RFC 3339", *pr.SourceIdentity.CreatedAt)
 	}
 	return ""
+}
+
+// isRFC3339 reports whether s is an RFC 3339 instant. Go's time.RFC3339
+// layout is narrower than the standard: RFC 3339 permits lowercase "t" and
+// "z" designators, and docs/schemas/adapter/provision-response.json
+// declares them valid. Failing an adapter whose output validates against
+// the published schema would be a defect in this suite, not in the
+// adapter. RFC 3339 contains no other letters, so upper-casing reaches the
+// strict layout without changing any value.
+func isRFC3339(s string) bool {
+	if _, err := time.Parse(time.RFC3339, s); err == nil {
+		return true
+	}
+	_, err := time.Parse(time.RFC3339, strings.ToUpper(s))
+	return err == nil
 }
 
 func timingsProblem(res *opResult, pr *provisionResult, happyProblem string) string {
