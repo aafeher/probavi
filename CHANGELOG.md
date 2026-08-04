@@ -77,6 +77,24 @@ always called out explicitly.
 
 ### Fixed
 
+- Four small correctness items found during the audit:
+
+  - `Timings.validate` ranged over a map, so a record with several negative
+    phases named a different field on each run. Diagnostics a trust product
+    prints have to be reproducible for whoever is comparing two logs.
+  - The adapter environment could carry a variable twice when
+    `source.credential_env` named a baseline one (`PATH`, `HOME`, `LANG`,
+    `TZ`), leaving which value the adapter saw to exec's last-wins rule
+    rather than to the §2.5 allow-list.
+  - `checks.Result` carried a `Duration` nothing ever read, measured with a
+    clock that ignored the injected one. The evidence schema records
+    per-phase timings, not per-check ones, so the field is gone rather than
+    published.
+  - `evidence keygen` did not fsync the key files it wrote. A signing key
+    that never reached a platter leaves a log nobody can verify and a
+    signer nobody can rotate away from, because the records referencing it
+    already exist.
+
 - A cancelled drill is now recorded as `cancelled`. `classify` mapped only
   `context.DeadlineExceeded` to a verdict, so Ctrl-C or SIGTERM produced
   whatever the dying adapter last managed to say — usually

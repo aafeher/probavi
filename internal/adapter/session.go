@@ -280,7 +280,15 @@ func (s *session) finish() {
 func (r *Runner) buildEnv() []string {
 	names := append([]string{"PATH", "HOME", "LANG", "TZ"}, r.opts.CredentialEnv...)
 	env := make([]string, 0, len(names)+len(r.opts.Env))
+	seen := make(map[string]bool, len(names))
 	for _, name := range names {
+		// A credential named PATH (or any other baseline variable) would
+		// otherwise appear twice, leaving which one wins to exec's
+		// last-wins rule rather than to this allow-list.
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
 		if v, ok := os.LookupEnv(name); ok {
 			env = append(env, name+"="+v)
 		}

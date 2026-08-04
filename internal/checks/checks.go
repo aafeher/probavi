@@ -56,11 +56,13 @@ type Deps struct {
 }
 
 // Result is one executed check, ready to be mapped into an evidence record.
+// There is no duration field: the evidence schema records per-phase
+// timings, not per-check ones, so measuring here would produce a number
+// nothing may publish.
 type Result struct {
-	Name     string
-	OK       bool
-	Detail   string
-	Duration time.Duration
+	Name   string
+	OK     bool
+	Detail string
 }
 
 // Run executes every check in order. A false verdict does not stop the run
@@ -83,7 +85,6 @@ func Run(ctx context.Context, list []config.Check, deps Deps) ([]Result, error) 
 }
 
 func runOne(ctx context.Context, c *config.Check, i int, deps *Deps) (*Result, error) {
-	start := time.Now()
 	var (
 		ok     bool
 		detail string
@@ -108,10 +109,9 @@ func runOne(ctx context.Context, c *config.Check, i int, deps *Deps) (*Result, e
 		return nil, err
 	}
 	return &Result{
-		Name:     checkName(c, i),
-		OK:       ok,
-		Detail:   truncateDetail(detail),
-		Duration: time.Since(start),
+		Name:   checkName(c, i),
+		OK:     ok,
+		Detail: truncateDetail(detail),
 	}, nil
 }
 

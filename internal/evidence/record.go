@@ -227,12 +227,18 @@ func (r *Record) validateNested() error {
 }
 
 func (t *Timings) validate() error {
-	for name, v := range map[string]*int64{
-		"provision": t.Provision, "engine_ready": t.EngineReady, "transfer": t.Transfer,
-		"restore": t.Restore, "validate": t.Validate, "total": t.Total,
+	// Ordered, not a map: with several bad phases a map would name a
+	// different one on each run, and an error a trust product prints must
+	// be reproducible for whoever is comparing two logs.
+	for _, f := range []struct {
+		name string
+		v    *int64
+	}{
+		{"provision", t.Provision}, {"engine_ready", t.EngineReady}, {"transfer", t.Transfer},
+		{"restore", t.Restore}, {"validate", t.Validate}, {"total", t.Total},
 	} {
-		if v != nil && *v < 0 {
-			return fmt.Errorf("%w: timings_ms.%s is negative", ErrInvalidRecord, name)
+		if f.v != nil && *f.v < 0 {
+			return fmt.Errorf("%w: timings_ms.%s is negative", ErrInvalidRecord, f.name)
 		}
 	}
 	return nil

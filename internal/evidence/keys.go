@@ -134,6 +134,12 @@ func writeExclusive(path, content string, mode os.FileMode) error {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
 	_, werr := f.WriteString(content)
+	if werr == nil {
+		// A key that reached no platter is a log nobody can verify and a
+		// signer nobody can rotate away from: the records referencing it
+		// would already exist.
+		werr = f.Sync()
+	}
 	cerr := f.Close()
 	if werr != nil {
 		return errors.Join(fmt.Errorf("write %s: %w", path, werr), cerr, os.Remove(path))
