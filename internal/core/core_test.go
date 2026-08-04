@@ -556,6 +556,8 @@ func TestUnregisteredErrorCodeIsNormalized(t *testing.T) {
 			}
 		})
 	}
+}
+
 // TestNonASCIIFailureTextStillLeavesARecord is the regression test for the
 // class of bug where a drill ran and then lost its proof. Both strings are
 // non-ASCII and longer than their evidence caps: an adapter reporting an
