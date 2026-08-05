@@ -11,165 +11,7 @@ always called out explicitly.
 
 ## [Unreleased]
 
-### Fixed
-
-- **The documented checksum command verified nothing, and said it was
-  fine.** `nfpm` spells a pre-release `0.3.0~rc.1` — correct version
-  ordering, since `~` sorts before the final release — but GitHub will
-  not keep a `~` in a release asset's filename. The file uploaded as
-  `probavi_0.3.0.rc.1_amd64.deb` was therefore checksummed under a name
-  nobody could download, so `sha256sum -c SHA256SUMS --ignore-missing`,
-  the command the release notes print, skipped **every package** and
-  exited 0. A green tick for something it never looked at, in a product
-  whose whole proposition is verifiable artifacts. Package filenames are
-  now normalised where they are produced, and any name a release asset
-  could not keep is a hard error. The version inside the package is
-  untouched, so the ordering still holds.
-
-- **The container image was published under a tag no document names.**
-  `github.ref_name` is the git tag, so the workflow pushed
-  `probavi:v0.3.0` while `docs/docker.md` told readers to
-  `docker pull ghcr.io/probavi/probavi:0.3.0` — a 404 for every one of
-  them, and invisible to CI, because the push succeeds and the
-  documentation is prose. The image now carries the version without the
-  leading `v`, matching the archives and the documentation.
-
-  Both were found by cutting `v0.3.0-rc.1` and inspecting what it
-  produced, which is what a release candidate is for.
-
-- **The rendered `PKGBUILD` and ebuild were unusable**, and would have
-  shipped attached to the first release that produced them. `envsubst`
-  with no argument substitutes *every* `${...}` it finds and replaces the
-  unset ones with nothing, so a PKGBUILD came out with `${pkgdir}`,
-  `${srcdir}` and `${pkgbase}` erased — `cd "/probavi-"`, a download URL
-  with no version in it, `-X main.version=`. It built cleanly into a
-  release asset; the first person to notice would have been an Arch user
-  running `makepkg`. Every render now names the variables it fills.
-
-- **A pre-release tag produced invalid recipes.** `makepkg` rejects a
-  hyphen in `pkgver` and portage's grammar wants `_rc1`, so `0.3.0-rc.1`
-  is renamed to `0.3.0rc1` and `0.3.0_rc1` for those two — while the
-  download URL keeps the tag that was actually pushed, which the naive
-  rename would have broken. `nfpm` needed nothing: it already emits
-  `~rc.1`, the form that sorts *before* the final release. Found by
-  rendering the recipes for a release-candidate tag before cutting one.
-
-  Three gates: a recipe must survive rendering with its own shell
-  variables intact, every `envsubst` call must carry a SHELL-FORMAT
-  argument, and a source recipe must build its download URL from the tag
-  rather than from the version.
-
 ## [0.3.0] - 2026-08-05
-
-### Added
-
-- Translated README introductions in Hungarian, German, French, and
-  Spanish (`README.hu.md`, `README.de.md`, `README.fr.md`,
-  `README.es.md`), matching four of the shipped CLI locales — an operator
-  who reads Probavi's diagnostics in their language can now read what
-  Probavi is in the same language. Deliberately narrow (`docs/i18n.md`
-  §7): only the stable spans of `README.md` are translated — what Probavi
-  is, why it exists, the non-goals. Status, install, examples, and every
-  capability inventory stay English-only, because a translated copy of
-  them is a claim nobody can keep in sync; `docs/capabilities.json`
-  remains the single machine-readable statement of what ships. The
-  specs in `docs/` are normative and stay English-only.
-
-  Translations are pinned to the English bytes they were made from: each
-  file records the SHA-256 of every span it covers, and the new
-  test-only `internal/docs` package fails the build when an English edit
-  leaves a translation behind, when a pin outlives its span, when a
-  translation smuggles in a version claim, or when the language row and
-  the committed files disagree. Same principle as the catalog gates of
-  `docs/i18n.md` §4: a translation may exist here only while a machine
-  can prove it is current. Terminology follows each language's shipped
-  CLI catalog, so the README and the terminal agree. All four texts have
-  since been through the linguistic review recorded under *Changed*
-  below; native-speaker feedback remains welcome and is folded in as it
-  arrives (docs/i18n.md §5).
-
-- The independent evidence verifier has a tagged, pinnable release:
-  `spec/evidence/v0.2.0`. It lives in its own Go module, so it carries its
-  own `spec/evidence/vX.Y.Z` tags and versions independently of the
-  `probavi` binary — until now it had no tags at all, and
-  `@latest` resolved to a pseudo-version of `main`, which meant the one
-  artifact whose whole purpose is independent verification could not be
-  named in an audit. Pin it when the verification itself has to be
-  reproducible:
-
-  ```sh
-  go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@v0.2.0
-  ```
-
-  `@latest` keeps working and stays the recommended default for casual use.
-
-- **`spec/evidence/v0.3.0`** — the independent verifier is retagged with
-  this release because it changed materially: it accepts
-  `probavi-evidence/2`, which the core now writes. Pinning
-  `spec/evidence/v0.2.0` would pin a verifier that rejects every record
-  produced from this release onward. The two tags move together from now
-  on whenever the verifier changes; the schema version, not either tag,
-  remains the compatibility contract (evidence-schema.md §10).
-
-### Changed
-
-- **A full linguistic review of every translated surface** — all 23 locale
-  catalogs and all four README translations — landing 170 catalog
-  corrections and the terminology and typography rules behind them
-  (`docs/i18n.md` §8, new and normative).
-
-  The headline finding is a product-level one, not a wording one:
-  **nineteen of the twenty-three catalogs used the same word for a *drill*
-  and for a *game-day*.** Both render as "exercise" in most European
-  languages, so a localized operator could not tell one restore proof from
-  an exercise made of many. Where the collision exists the game-day is now
-  named `game-day` — a term already untranslated in every catalog — while
-  the drill keeps the language's own word. Two further distinctions the
-  product depends on are now stated and applied: *restore* against
-  *recovery/recoverability*, and the frozen protocol *conformance checks*
-  against a drill's *validation checks*.
-
-  The rest are ordinary translation defects, each verified against the
-  English source: `hard wall-clock limit` had been flattened to "time
-  limit" in twenty catalogs, dropping the fact that the limit is on real
-  elapsed time; Swedish said "dependencies to a failed member" where the
-  English says *dependents of*; five catalogs left a bare adjective where
-  the noun it modified had been dropped; Danish had a wrong-gender pronoun
-  and a wrong-gender article; Greek left an English word (`mode`) inside a
-  Greek sentence, and Greek and Irish both described the frozen check list
-  with the word for *frozen solid*. In the READMEs: Hungarian rendered
-  "row counts" as *ordinal numbers*, Spanish rendered "data freshness"
-  with the word used for food and inverted the range it appears in,
-  German used *Korruption* — bribery, not data corruption — and both
-  German and Hungarian closed their opening typographic quote with an
-  ASCII `"`.
-
-  Three of the four open questions from the translations' own review notes
-  are answered in `docs/i18n.md` §8 rather than left to the next
-  translator: the drill/game-day and restore/recovery splits above, and
-  French spacing — the README takes the non-breaking space French
-  typography requires, the catalogs keep a plain space, because terminal
-  output is grepped and copied.
-
-- **Specs:** `docs/adapter-protocol.md` §6.2 and `docs/evidence-schema.md`
-  §3 now state the `created_at` contract that neither of them carried: the
-  adapter may report any RFC 3339 instant, and the core converts it to the
-  evidence record's UTC millisecond form by truncation — never rounding, so
-  a backup is never recorded as newer than it is. An unparseable value is
-  an `adapter_crash` verdict, never a lost record.
-
-  The gap was real and reachable: the evidence schema requires exactly
-  millisecond precision, the protocol required nothing, the protocol's own
-  example showed a second-precision instant, and `probavi adapter
-  conformance` accepts any RFC 3339 — so a third-party adapter could pass
-  "15/15 conformant" and then end every drill with "evidence record could
-  not be written" after a successful restore. The four in-repo adapters
-  already emit the millisecond form, which is why CI never saw it.
-
-  No wire change and no version bump for either contract: nothing required
-  of adapters is tightened, and no adapter that conforms today stops
-  conforming. The core-side normalization that makes this true is a
-  separate change.
 
 ### Added
 
@@ -426,7 +268,161 @@ always called out explicitly.
   be waved through where a reviewer can see the waiver. The failure
   message names the label, so nobody has to go looking for it.
 
+- Translated README introductions in Hungarian, German, French, and
+  Spanish (`README.hu.md`, `README.de.md`, `README.fr.md`,
+  `README.es.md`), matching four of the shipped CLI locales — an operator
+  who reads Probavi's diagnostics in their language can now read what
+  Probavi is in the same language. Deliberately narrow (`docs/i18n.md`
+  §7): only the stable spans of `README.md` are translated — what Probavi
+  is, why it exists, the non-goals. Status, install, examples, and every
+  capability inventory stay English-only, because a translated copy of
+  them is a claim nobody can keep in sync; `docs/capabilities.json`
+  remains the single machine-readable statement of what ships. The
+  specs in `docs/` are normative and stay English-only.
+
+  Translations are pinned to the English bytes they were made from: each
+  file records the SHA-256 of every span it covers, and the new
+  test-only `internal/docs` package fails the build when an English edit
+  leaves a translation behind, when a pin outlives its span, when a
+  translation smuggles in a version claim, or when the language row and
+  the committed files disagree. Same principle as the catalog gates of
+  `docs/i18n.md` §4: a translation may exist here only while a machine
+  can prove it is current. Terminology follows each language's shipped
+  CLI catalog, so the README and the terminal agree. All four texts have
+  since been through the linguistic review recorded under *Changed*
+  below; native-speaker feedback remains welcome and is folded in as it
+  arrives (docs/i18n.md §5).
+
+- The independent evidence verifier has a tagged, pinnable release:
+  `spec/evidence/v0.2.0`. It lives in its own Go module, so it carries its
+  own `spec/evidence/vX.Y.Z` tags and versions independently of the
+  `probavi` binary — until now it had no tags at all, and
+  `@latest` resolved to a pseudo-version of `main`, which meant the one
+  artifact whose whole purpose is independent verification could not be
+  named in an audit. Pin it when the verification itself has to be
+  reproducible:
+
+  ```sh
+  go install github.com/probavi/probavi/spec/evidence/cmd/probavi-evidence-verify@v0.2.0
+  ```
+
+  `@latest` keeps working and stays the recommended default for casual use.
+
+- **`spec/evidence/v0.3.0`** — the independent verifier is retagged with
+  this release because it changed materially: it accepts
+  `probavi-evidence/2`, which the core now writes. Pinning
+  `spec/evidence/v0.2.0` would pin a verifier that rejects every record
+  produced from this release onward. The two tags move together from now
+  on whenever the verifier changes; the schema version, not either tag,
+  remains the compatibility contract (evidence-schema.md §10).
+
+### Changed
+
+- **A full linguistic review of every translated surface** — all 23 locale
+  catalogs and all four README translations — landing 170 catalog
+  corrections and the terminology and typography rules behind them
+  (`docs/i18n.md` §8, new and normative).
+
+  The headline finding is a product-level one, not a wording one:
+  **nineteen of the twenty-three catalogs used the same word for a *drill*
+  and for a *game-day*.** Both render as "exercise" in most European
+  languages, so a localized operator could not tell one restore proof from
+  an exercise made of many. Where the collision exists the game-day is now
+  named `game-day` — a term already untranslated in every catalog — while
+  the drill keeps the language's own word. Two further distinctions the
+  product depends on are now stated and applied: *restore* against
+  *recovery/recoverability*, and the frozen protocol *conformance checks*
+  against a drill's *validation checks*.
+
+  The rest are ordinary translation defects, each verified against the
+  English source: `hard wall-clock limit` had been flattened to "time
+  limit" in twenty catalogs, dropping the fact that the limit is on real
+  elapsed time; Swedish said "dependencies to a failed member" where the
+  English says *dependents of*; five catalogs left a bare adjective where
+  the noun it modified had been dropped; Danish had a wrong-gender pronoun
+  and a wrong-gender article; Greek left an English word (`mode`) inside a
+  Greek sentence, and Greek and Irish both described the frozen check list
+  with the word for *frozen solid*. In the READMEs: Hungarian rendered
+  "row counts" as *ordinal numbers*, Spanish rendered "data freshness"
+  with the word used for food and inverted the range it appears in,
+  German used *Korruption* — bribery, not data corruption — and both
+  German and Hungarian closed their opening typographic quote with an
+  ASCII `"`.
+
+  Three of the four open questions from the translations' own review notes
+  are answered in `docs/i18n.md` §8 rather than left to the next
+  translator: the drill/game-day and restore/recovery splits above, and
+  French spacing — the README takes the non-breaking space French
+  typography requires, the catalogs keep a plain space, because terminal
+  output is grepped and copied.
+
+- **Specs:** `docs/adapter-protocol.md` §6.2 and `docs/evidence-schema.md`
+  §3 now state the `created_at` contract that neither of them carried: the
+  adapter may report any RFC 3339 instant, and the core converts it to the
+  evidence record's UTC millisecond form by truncation — never rounding, so
+  a backup is never recorded as newer than it is. An unparseable value is
+  an `adapter_crash` verdict, never a lost record.
+
+  The gap was real and reachable: the evidence schema requires exactly
+  millisecond precision, the protocol required nothing, the protocol's own
+  example showed a second-precision instant, and `probavi adapter
+  conformance` accepts any RFC 3339 — so a third-party adapter could pass
+  "15/15 conformant" and then end every drill with "evidence record could
+  not be written" after a successful restore. The four in-repo adapters
+  already emit the millisecond form, which is why CI never saw it.
+
+  No wire change and no version bump for either contract: nothing required
+  of adapters is tightened, and no adapter that conforms today stops
+  conforming. The core-side normalization that makes this true is a
+  separate change.
+
 ### Fixed
+
+- **The documented checksum command verified nothing, and said it was
+  fine.** `nfpm` spells a pre-release `0.3.0~rc.1` — correct version
+  ordering, since `~` sorts before the final release — but GitHub will
+  not keep a `~` in a release asset's filename. The file uploaded as
+  `probavi_0.3.0.rc.1_amd64.deb` was therefore checksummed under a name
+  nobody could download, so `sha256sum -c SHA256SUMS --ignore-missing`,
+  the command the release notes print, skipped **every package** and
+  exited 0. A green tick for something it never looked at, in a product
+  whose whole proposition is verifiable artifacts. Package filenames are
+  now normalised where they are produced, and any name a release asset
+  could not keep is a hard error. The version inside the package is
+  untouched, so the ordering still holds.
+
+- **The container image was published under a tag no document names.**
+  `github.ref_name` is the git tag, so the workflow pushed
+  `probavi:v0.3.0` while `docs/docker.md` told readers to
+  `docker pull ghcr.io/probavi/probavi:0.3.0` — a 404 for every one of
+  them, and invisible to CI, because the push succeeds and the
+  documentation is prose. The image now carries the version without the
+  leading `v`, matching the archives and the documentation.
+
+  Both were found by cutting `v0.3.0-rc.1` and inspecting what it
+  produced, which is what a release candidate is for.
+
+- **The rendered `PKGBUILD` and ebuild were unusable**, and would have
+  shipped attached to the first release that produced them. `envsubst`
+  with no argument substitutes *every* `${...}` it finds and replaces the
+  unset ones with nothing, so a PKGBUILD came out with `${pkgdir}`,
+  `${srcdir}` and `${pkgbase}` erased — `cd "/probavi-"`, a download URL
+  with no version in it, `-X main.version=`. It built cleanly into a
+  release asset; the first person to notice would have been an Arch user
+  running `makepkg`. Every render now names the variables it fills.
+
+- **A pre-release tag produced invalid recipes.** `makepkg` rejects a
+  hyphen in `pkgver` and portage's grammar wants `_rc1`, so `0.3.0-rc.1`
+  is renamed to `0.3.0rc1` and `0.3.0_rc1` for those two — while the
+  download URL keeps the tag that was actually pushed, which the naive
+  rename would have broken. `nfpm` needed nothing: it already emits
+  `~rc.1`, the form that sorts *before* the final release. Found by
+  rendering the recipes for a release-candidate tag before cutting one.
+
+  Three gates: a recipe must survive rendering with its own shell
+  variables intact, every `envsubst` call must carry a SHELL-FORMAT
+  argument, and a source recipe must build its download URL from the tag
+  rather than from the version.
 
 - **A downloaded release could not run a single drill.** The release
   workflow built `./cmd/probavi` and nothing else, but the core resolves
