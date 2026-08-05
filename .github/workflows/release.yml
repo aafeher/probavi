@@ -287,6 +287,10 @@ jobs:
           # image adds no long-lived secret to this repository.
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: the version this tag names
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: build and push
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -295,9 +299,15 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: VERSION=${{ github.ref_name }}
-          # No :latest. A drill's evidence should name a version somebody
-          # can pull again, and a floating tag makes that impossible.
-          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          # Without the leading "v", matching the release archives and
+          # what docs/docker.md tells people to pull. github.ref_name is
+          # the tag, so using it raw published probavi:v0.3.0 while every
+          # document said probavi:0.3.0 — a 404 for every reader.
+          #
+          # No :latest either. A drill's evidence should name a version
+          # somebody can pull again, and a floating tag makes that
+          # impossible.
+          tags: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.value }}
           provenance: true
           sbom: true
 
@@ -305,6 +315,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ steps.push.outputs.digest }}
+          VERSION: ${{ steps.version.outputs.value }}
         run: |
           set -euo pipefail
           # Append to the notes the release job wrote; --notes-file
@@ -315,7 +326,7 @@ jobs:
             echo "## Container image"
             echo
             echo '```sh'
-            echo "docker pull ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_REF_NAME}"
+            echo "docker pull ghcr.io/${GITHUB_REPOSITORY}:${VERSION}"
             echo '```'
             echo
             echo "Immutable digest — pin this in anything automated:"
