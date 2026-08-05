@@ -1,7 +1,7 @@
 # Probavi evidence format — independent verifier
 
 An independent implementation of the Probavi evidence log format, covering
-schema versions `probavi-evidence/0` and `probavi-evidence/1`.
+schema versions `probavi-evidence/0`, `/1` and `/2`.
 
 The normative specification is [`docs/evidence-schema.md`](../../docs/evidence-schema.md).
 This directory is the *second* implementation of it.

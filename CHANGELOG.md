@@ -115,10 +115,31 @@ always called out explicitly.
 
 ### Added
 
+- **The independent verifier accepts `probavi-evidence/2`**, and a new
+  test pins its supported set to the versions the published JSON Schema
+  declares — in both directions.
+
+  §10 has always obliged a verifier to support every published version,
+  for the lifetime of the format. Nothing enforced it. The specification
+  could publish a version `spec/evidence` refuses, which is how an auditor
+  ends up holding a log the independent verifier calls INVALID for no
+  reason but a stale allow-list; the reverse — a version silently dropped
+  — would be worse, because records already written would stop verifying.
+  Both are now build failures.
+
+  Covered by construction rather than by assertion about a map: a v2
+  record signed the way §6 prescribes verifies against the committed
+  public key, with the digests populated *and* null, since §3 makes them
+  nullable so an unreadable executable never costs a drill its record. A
+  log whose writer moved from v1 to v2 mid-file chains straight through,
+  which is what a real upgrade produces. `probavi-evidence/3` is still
+  refused, so the allow-list grew by one entry rather than into a
+  wildcard. `spec/evidence` holds its 100% statement coverage.
+
 - **Evidence schema v2 (`probavi-evidence/2`): `adapter.digest` and
-  `env.probavi_digest`** — spec and JSON Schema only; no writer emits v2
-  yet, and `docs/evidence-schema.md` §11.1 lists what still has to land
-  before one may.
+  `env.probavi_digest`** — spec and JSON Schema; no writer emits v2 yet,
+  and `docs/evidence-schema.md` §11.1 lists what still has to land before
+  one may.
 
   A record named the adapter and its semantic version but carried no
   **build identity**, so two materially different builds could produce
