@@ -11,6 +11,8 @@ always called out explicitly.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-05
+
 ### Fixed
 
 - **The container image stamped its binary with the git tag**, so
@@ -24,6 +26,23 @@ always called out explicitly.
   The same mistake as the image *tag* fixed a moment earlier, in the
   second place it appears: the tag was corrected, the build argument next
   to it was not. The gate now covers both.
+
+  **v0.3.0 was not re-cut**, deliberately. The Go module proxy had
+  already recorded `github.com/probavi/probavi@v0.3.0` and
+  `…/spec/evidence@v0.3.0` against the tagged commit, and the checksum
+  database is immutable by design: re-pointing either tag would make
+  `go install …@v0.3.0` fail permanently for everyone, exactly the way
+  `v0.1.0` fails under the new module path today. A published image tag
+  and a digest already printed in published release notes carry the same
+  rule. The stamp is inconsistent, not invalid — the schema asks only for
+  a non-empty string — so 0.3.1 supersedes it rather than rewriting it.
+
+  The version gate learned something from this too: it required the
+  documented `probavi-evidence-verify@vX.Y.Z` to equal the release, but
+  `spec/evidence` is a separate module tagged independently, and this
+  release does not touch it. Its pin is now held to the newest
+  `spec/evidence` tag the changelog names, which is what is actually
+  true, and a release no longer drags a meaningless module tag along.
 
 ## [0.3.0] - 2026-08-05
 
@@ -1029,7 +1048,8 @@ First tagged release. Everything below is new.
 - `probavi version`: prints the binary version and the contract versions
   the build speaks.
 
-[Unreleased]: https://github.com/probavi/probavi/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/probavi/probavi/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/probavi/probavi/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/probavi/probavi/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/probavi/probavi/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/probavi/probavi/releases/tag/v0.1.0
