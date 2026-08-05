@@ -1,7 +1,8 @@
-# Probavi Evidence Schema — v1
+# Probavi Evidence Schema — v2
 
-Status: **v1 — approved by the maintainer 2026-08-01; FROZEN 2026-08-01.
-NORMATIVE.** The evidence format is the product's core trust artifact; treat
+Status: **v2 — approved by the maintainer 2026-08-05. NORMATIVE.** v1 was
+frozen 2026-08-01; v2 adds two nullable fields and changes nothing else
+(§10). The evidence format is the product's core trust artifact; treat
 every field and byte here as a public API. Any change requires a schema
 version bump in this document before any code changes. The key words MUST,
 MUST NOT, SHOULD, and MAY are to be interpreted as described in RFC 2119.
@@ -9,8 +10,11 @@ A machine-readable JSON Schema covering every published version lives at
 `docs/schemas/evidence/record.json` (derived from this document; on any
 disagreement this document wins).
 
-Schema identifier: `probavi-evidence/1`. Writers emit v1; verifiers MUST
-also accept records declaring `probavi-evidence/0` (§10).
+Schema identifier: `probavi-evidence/2`. Verifiers MUST accept every
+published version — `probavi-evidence/0`, `/1` and `/2` (§10). Writers
+still emit v1: the core does not record the v2 digests yet, and the
+version is published first so that verifiers can be updated before any v2
+record exists.
 
 ---
 
@@ -59,7 +63,7 @@ only:
 
 ```json
 {
-  "schema": "probavi-evidence/0",
+  "schema": "probavi-evidence/2",
   "seq": 1042,
   "prev_hash": "sha256:b5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c",
   "ts": "2026-07-31T02:00:11.482Z",
@@ -74,7 +78,12 @@ only:
     "size_bytes": 565248,
     "created_at": "2026-07-30T01:58:02.000Z"
   },
-  "adapter": {"name": "postgres", "version": "0.1.0", "protocol": "probavi-adapter/0"},
+  "adapter": {
+    "name": "postgres",
+    "version": "0.1.0",
+    "protocol": "probavi-adapter/0",
+    "digest": "sha256:05f3b8f6ec13d17858d1b7ec47108f519f2c86d9a013bacb90b44f14577d6795"
+  },
   "sandbox": {"provider": "docker", "params": {"image": "postgres:16", "memory": "2GiB"}},
   "timings_ms": {
     "provision": 1170,
@@ -94,7 +103,8 @@ only:
     "probavi_version": "0.1.0",
     "os": "linux",
     "arch": "amd64",
-    "host_id": "3f7a9c2e5b1d8e04"
+    "host_id": "3f7a9c2e5b1d8e04",
+    "probavi_digest": "sha256:1d2c3b4a5968778695a4b3c2d1e0f00112233445566778899aabbccddeeff001"
   },
   "sig": {
     "alg": "ed25519",
@@ -120,6 +130,8 @@ Field reference:
 | `backup.size_bytes` | integer | yes | Source size. |
 | `backup.created_at` | string | yes | Backup's own creation time if derivable (RFC 3339 UTC, ms, `Z`). Normalized by the core from the adapter's `source_identity.created_at`, which may carry any RFC 3339 precision or offset: converted to UTC and truncated — never rounded — to milliseconds (adapter protocol §6.2). |
 | `adapter.name` / `.version` / `.protocol` | string | version: yes | Adapter identity; protocol version actually spoken. |
+| `adapter.digest` | string | yes | `sha256:` of the adapter executable the core resolved and launched (v2). Build identity, which `adapter.version` is not: the version is a semantic number the adapter reports about itself, so two different builds can share one. Null when the file could not be read — a digest is never worth failing a drill for. **What it attests:** the bytes of the file the core selected at the path `probavi-adapter-<name>` resolved to, hashed before launch. It does not prove those bytes are the instructions that ran: a file replaced between hashing and `exec` would go unnoticed. Closing that window would mean reading `/proc/<pid>/exe`, which does not exist on every platform Probavi supports, so the narrower claim is the one this field makes. |
+| `env.probavi_digest` | string | yes | `sha256:` of the `probavi` executable that wrote the record (v2), obtained from the running program's own path. Same rationale and the same attestation limit as `adapter.digest`: the core chooses the sandbox, runs the checks and signs the record, so "which bytes produced this proof" is unanswered without it. Null when the path could not be read. |
 | `sandbox.provider` | string | no | Provider name (`docker`, …). |
 | `sandbox.params` | object (string→string) | no | Provider parameters from config, values as written. Never tokens/handles. |
 | `timings_ms.*` | integer | yes (per phase) | Per-phase durations in milliseconds (§3.1). Phases that never ran are null. |
@@ -337,7 +349,8 @@ Published versions and migration notes:
 | Version | Shape difference | Migration |
 |---------|------------------|-----------|
 | `probavi-evidence/0` | v1 without `drill.pitr_target`. | None — v0 records lack the field entirely (fixed shape per version) and remain valid forever under v0. Writers emit v1 from 2026-08-01. |
-| `probavi-evidence/1` | Current (§3). | — |
+| `probavi-evidence/1` | v2 without `adapter.digest` and `env.probavi_digest`. | None — v1 records lack both fields entirely and remain valid forever under v1. |
+| `probavi-evidence/2` | Current (§3). | Both new fields are nullable, so a writer that cannot read an executable still emits a conforming record. **No writer emits v2 yet**; the version is published here so verifiers can be updated first. The obligation in this section — that a verifier support every published version — attaches to v2 from the moment the core can write it, which is a separate change. |
 
 ## 11. v1 freeze
 
@@ -355,6 +368,27 @@ further change to this schema is a version bump (§10).
       CI verifies both logs offline with only the committed public key.
       Done 2026-08-01; moved out of `internal/` and published as conformance
       vectors 2026-08-02 (§12).
+
+### 11.1 v2 status
+
+v2 is **defined but not yet written**. What is done, and what a v2 record
+needs before the core may emit one:
+
+- [x] Machine-readable JSON Schema: `recordV2` in
+      `docs/schemas/evidence/record.json`, with `internal/spec` proving it
+      constrains — required digests, `sha256:` form or null and nothing
+      else, and rejection of a v0/v1 record carrying either field.
+      Done 2026-08-05.
+- [x] The §3 example is a v2 record and CI validates it against the
+      schema, so the document and its derived schema cannot drift.
+      Done 2026-08-05.
+- [ ] `spec/evidence` accepts `probavi-evidence/2`. Until it does, no v2
+      record may be written: §10 obliges every verifier to support every
+      published version, and the independent verifier is the one that
+      matters most.
+- [ ] Worked example: a byte-exact signed `log_v2.jsonl` beside the v0 and
+      v1 vectors (§12), which requires a writer.
+- [ ] The core populates both digests.
 
 ## 12. Independent verification
 
@@ -393,6 +427,32 @@ notes are collected in `spec/evidence/README.md`.
 
 ## Changelog
 
+- v2 (2026-08-05): added `adapter.digest` and `env.probavi_digest` —
+  nullable `sha256:` references to the adapter executable the core
+  launched and to the `probavi` executable that wrote the record.
+  Rationale: a record named the adapter and its semantic version but
+  carried no build identity, so two materially different builds could
+  produce records claiming the same provenance — indistinguishable to the
+  auditor those records exist for. `adapter.version` cannot close this: it
+  is a number the adapter reports about itself, and nothing forces it to
+  move when the code does (the CI gate added the same week reduces that
+  drift but cannot remove it, and says nothing about a third-party
+  adapter). Both fields were taken in one version rather than the adapter
+  alone: the same argument applies verbatim to the orchestrator, which
+  chooses the sandbox, runs the checks and signs the record, and §10 makes
+  every field addition a major bump — so deferring the symmetric half
+  would have cost a second migration for every verifier. Both are
+  nullable, because an unreadable executable must never cost a drill its
+  signed record (§7.1 exists for the same reason). The attestation limit
+  is stated in §3 rather than implied: the digest covers the file the core
+  selected, hashed before launch, not the instructions that ran. Approved
+  by the maintainer 2026-08-05. No other shape or byte-level change; v1
+  and v0 records remain valid under their own versions (§10).
+  Also corrected here: the §3 example declared `probavi-evidence/0` while
+  carrying `drill.pitr_target`, a combination the published JSON Schema
+  rejects — the example was not moved to v1 when that field was added. It
+  now shows a v2 record, and `internal/spec` validates it against the
+  schema so the two documents cannot drift again.
 - Editorial (2026-08-04, no format change): §7.1 added, specifying the
   degraded record the core appends when the composed one is refused on
   shape grounds. It uses only fields this schema already defines — no new

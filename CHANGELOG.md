@@ -115,6 +115,44 @@ always called out explicitly.
 
 ### Added
 
+- **Evidence schema v2 (`probavi-evidence/2`): `adapter.digest` and
+  `env.probavi_digest`** — spec and JSON Schema only; no writer emits v2
+  yet, and `docs/evidence-schema.md` §11.1 lists what still has to land
+  before one may.
+
+  A record named the adapter and its semantic version but carried no
+  **build identity**, so two materially different builds could produce
+  records claiming the same provenance — indistinguishable to the auditor
+  those records exist for. `adapter.version` cannot close this: it is a
+  number the adapter reports about itself, and the CI gate below reduces
+  the drift without removing it, and says nothing at all about a
+  third-party adapter.
+
+  Both fields were taken in one version rather than the adapter alone. The
+  same argument applies verbatim to the orchestrator — the core chooses
+  the sandbox, runs the checks and signs the record — and §10 makes every
+  field addition a major bump, so deferring the symmetric half would have
+  cost a second migration for every verifier. Both are nullable: an
+  unreadable executable must never cost a drill its signed record.
+
+  The attestation limit is written into §3 rather than implied. The digest
+  covers the bytes of the file the core selected, hashed before launch. It
+  does not prove those bytes are the instructions that ran — a file
+  swapped between hashing and `exec` would go unnoticed, and closing that
+  window means reading `/proc/<pid>/exe`, which does not exist on every
+  platform Probavi supports.
+
+  **A pre-existing defect surfaced and is fixed here:** the §3 worked
+  example declared `probavi-evidence/0` while carrying
+  `drill.pitr_target`, a combination the published JSON Schema rejects —
+  the example was never moved to v1 when that field was added, so a reader
+  copying it as a starting point would have produced records their own
+  verifier refuses. The example is now a v2 record, and a new gate in
+  `internal/spec` validates it against the schema on every run, so the
+  normative document and the schema derived from it cannot drift again.
+  That gate caught a malformed digest in this very change before it
+  reached review.
+
 - **A CI gate that will not let an adapter's source change without its
   `adapterVersion` moving** (`internal/tools/adapterversion`, wired into
   `ci.yml` for pull requests).
