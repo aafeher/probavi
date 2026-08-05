@@ -172,3 +172,51 @@ func TestEveryEnvsubstCallIsRestricted(t *testing.T) {
 		})
 	}
 }
+
+// imageTag matches the tag the release workflow pushes to GHCR.
+var imageTag = regexp.MustCompile(`(?m)^\s*tags: ghcr\.io/\$\{\{ github\.repository \}\}:(.+)$`)
+
+// TestPublishedImageTagMatchesTheDocumentedPull keeps one pull command
+// true.
+//
+// github.ref_name is the git tag, so using it raw published
+// probavi:v0.3.0 while every document said `docker pull probavi:0.3.0` —
+// a 404 for every reader, and one nothing in CI would notice, because
+// the push succeeds and the documentation is prose.
+func TestPublishedImageTagMatchesTheDocumentedPull(t *testing.T) {
+	m := imageTag.FindStringSubmatch(read(t, ".github/workflows/release.yml"))
+	if m == nil {
+		t.Fatal(".github/workflows/release.yml no longer pushes a tagged image")
+	}
+	if strings.Contains(m[1], "github.ref_name") {
+		t.Errorf("the image is tagged %s, which carries the leading \"v\" of the git tag; "+
+			"docs/docker.md tells readers to pull the version without it", m[1])
+	}
+	// The documented pull must name a bare version, which is what the
+	// version gate already holds to the changelog.
+	if doc := read(t, "docs/docker.md"); !strings.Contains(doc, "docker pull ghcr.io/probavi/probavi:") {
+		t.Error("docs/docker.md no longer shows a docker pull command to keep in step")
+	}
+}
+
+// TestPackageNamesSurviveARelease pins the rename that keeps the
+// documented checksum command honest.
+//
+// nfpm spells a pre-release 0.3.0~rc.1, which is the correct version
+// ordering — it sorts before the final release. GitHub will not keep a
+// "~" in an asset filename, so the file uploaded as
+// probavi_0.3.0.rc.1_amd64.deb was checksummed under a name nobody could
+// download. `sha256sum -c SHA256SUMS --ignore-missing` then skipped every
+// package and exited 0: a green tick for something it never looked at,
+// in a product whose entire proposition is verifiable artifacts.
+func TestPackageNamesSurviveARelease(t *testing.T) {
+	script := directives(t, "packaging/build-packages.sh")
+	if !regexp.MustCompile(`(?m)^safe_names\s*$`).MatchString(script) {
+		t.Error("packaging/build-packages.sh no longer normalises package filenames, so a " +
+			"pre-release would be checksummed under names GitHub rewrites")
+	}
+	if !strings.Contains(script, "[!A-Za-z0-9._-]") {
+		t.Error("packaging/build-packages.sh no longer rejects filenames a release asset " +
+			"cannot keep — the rename alone only covers the character we already know about")
+	}
+}

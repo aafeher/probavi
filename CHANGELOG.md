@@ -13,6 +13,30 @@ always called out explicitly.
 
 ### Fixed
 
+- **The documented checksum command verified nothing, and said it was
+  fine.** `nfpm` spells a pre-release `0.3.0~rc.1` — correct version
+  ordering, since `~` sorts before the final release — but GitHub will
+  not keep a `~` in a release asset's filename. The file uploaded as
+  `probavi_0.3.0.rc.1_amd64.deb` was therefore checksummed under a name
+  nobody could download, so `sha256sum -c SHA256SUMS --ignore-missing`,
+  the command the release notes print, skipped **every package** and
+  exited 0. A green tick for something it never looked at, in a product
+  whose whole proposition is verifiable artifacts. Package filenames are
+  now normalised where they are produced, and any name a release asset
+  could not keep is a hard error. The version inside the package is
+  untouched, so the ordering still holds.
+
+- **The container image was published under a tag no document names.**
+  `github.ref_name` is the git tag, so the workflow pushed
+  `probavi:v0.3.0` while `docs/docker.md` told readers to
+  `docker pull ghcr.io/probavi/probavi:0.3.0` — a 404 for every one of
+  them, and invisible to CI, because the push succeeds and the
+  documentation is prose. The image now carries the version without the
+  leading `v`, matching the archives and the documentation.
+
+  Both were found by cutting `v0.3.0-rc.1` and inspecting what it
+  produced, which is what a release candidate is for.
+
 - **The rendered `PKGBUILD` and ebuild were unusable**, and would have
   shipped attached to the first release that produced them. `envsubst`
   with no argument substitutes *every* `${...}` it finds and replaces the
