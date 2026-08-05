@@ -145,12 +145,10 @@ func TestPackagingDocIsReachable(t *testing.T) {
 // is the adapter protocol version negotiated at handshake.
 func TestHomebrewFormulaeDependOnTheCoreOnly(t *testing.T) {
 	adapter := directives(t, "packaging/homebrew/adapter.rb.tmpl")
-	if !strings.Contains(adapter, `depends_on "probavi/tap/probavi"`) {
-		t.Error("the adapter formula does not depend on the core formula")
-	}
-	if regexp.MustCompile(`depends_on "probavi/tap/probavi"\s*,`).MatchString(adapter) {
-		t.Error("the adapter formula constrains the core's version — the contract is the " +
-			"adapter protocol version negotiated at handshake, not either formula version")
+	if !regexp.MustCompile(`(?m)^\s*depends_on "probavi"\s*$`).MatchString(adapter) {
+		t.Error("the adapter formula must depend on the core by plain name: there is no " +
+			"hosted tap, so a tap-qualified dependency would resolve nowhere, and a " +
+			"version constraint would replace the protocol handshake as the contract")
 	}
 	// The core must stay installable alone: an auditor verifying a log
 	// needs no adapter and no sandbox runtime.
@@ -174,6 +172,36 @@ func TestHomebrewFormulaeCoverBothArchitectures(t *testing.T) {
 				if !strings.Contains(body, want) {
 					t.Errorf("%s has no %s branch", tmpl, want)
 				}
+			}
+		})
+	}
+}
+
+// TestNothingPromisesAHostedTap keeps the macOS instructions honest.
+//
+// There is no probavi/homebrew-tap and there will not be one, so
+// `brew install probavi/tap/probavi` resolves nowhere. It is a plausible
+// line to write and an install command nobody can run, which is the worst
+// kind of documentation error: it looks tested.
+func TestNothingPromisesAHostedTap(t *testing.T) {
+	for _, path := range []string{
+		sourceDoc,
+		"docs/packaging.md",
+		"packaging/homebrew/probavi.rb.tmpl",
+		"packaging/homebrew/adapter.rb.tmpl",
+	} {
+		t.Run(path, func(t *testing.T) {
+			for i, line := range strings.Split(read(t, path), "\n") {
+				if !strings.Contains(line, "probavi/tap/") {
+					continue
+				}
+				// Prose may name the thing that does not exist in order to
+				// say so; a command or a formula directive may not.
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue
+				}
+				t.Errorf("%s:%d names a hosted tap that does not exist:\n  %s",
+					path, i+1, strings.TrimSpace(line))
 			}
 		})
 	}

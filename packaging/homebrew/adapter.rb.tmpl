@@ -6,11 +6,16 @@ class ${CLASS} < Formula
   version "${VERSION}"
   license "Apache-2.0"
 
+  # Unqualified, so the formula works in whatever tap it is installed
+  # from — there is no hosted Probavi tap, and a name like
+  # "probavi/tap/probavi" would only resolve inside one that does not
+  # exist (docs/packaging.md §5).
+  #
   # Unversioned on purpose: the compatibility contract between core and
   # adapter is the adapter protocol version, negotiated at handshake, not
   # either formula's version. That is what keeps per-adapter repositories
   # possible later (AGENTS.md §6).
-  depends_on "probavi/tap/probavi"
+  depends_on "probavi"
 
   on_macos do
     on_arm do
@@ -32,7 +37,7 @@ class ${CLASS} < Formula
     # The real contract: the core must find this adapter by name on PATH
     # and complete a protocol handshake with it. Asserting the binary
     # merely exists would pass for one installed where nothing reaches it.
-    core = Formula["probavi/tap/probavi"].opt_bin/"probavi"
+    core = Formula["probavi"].opt_bin/"probavi"
     assert_match "\"name\":\"${ADAPTER}\"", shell_output("#{core} adapter probe ${ADAPTER}")
   end
 end
