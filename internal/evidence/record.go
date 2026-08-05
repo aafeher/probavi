@@ -70,6 +70,12 @@ type Adapter struct {
 	Name     string  `json:"name"`
 	Version  *string `json:"version"`
 	Protocol string  `json:"protocol"`
+	// Digest is the sha256 reference of the adapter executable the core
+	// resolved and launched (schema §3). It is build identity, which
+	// Version is not: Version is a semantic number the adapter reports
+	// about itself, so two different builds can share one. Null when the
+	// file could not be read.
+	Digest *string `json:"digest"`
 }
 
 // Sandbox identifies the sandbox provider and its drill-config parameters.
@@ -109,6 +115,10 @@ type Env struct {
 	OS             string `json:"os"`
 	Arch           string `json:"arch"`
 	HostID         string `json:"host_id"`
+	// ProbaviDigest is the sha256 reference of the probavi executable that
+	// wrote the record (schema §3). Null when it could not be read: build
+	// identity is never worth failing a drill for.
+	ProbaviDigest *string `json:"probavi_digest"`
 }
 
 // Signature is the detached ed25519 signature over the record's canonical
@@ -214,6 +224,9 @@ func (r *Record) validateNested() error {
 	if r.Adapter.Name == "" || r.Adapter.Protocol == "" {
 		return fmt.Errorf("%w: adapter.name and adapter.protocol are required", ErrInvalidRecord)
 	}
+	if r.Adapter.Digest != nil && !sha256RefPattern.MatchString(*r.Adapter.Digest) {
+		return fmt.Errorf("%w: adapter.digest is not a sha256 reference", ErrInvalidRecord)
+	}
 	if r.Sandbox.Provider == "" {
 		return fmt.Errorf("%w: sandbox.provider is empty", ErrInvalidRecord)
 	}
@@ -250,6 +263,9 @@ func (e *Env) validate() error {
 	}
 	if !hostIDPattern.MatchString(e.HostID) {
 		return fmt.Errorf("%w: env.host_id must be 16 lowercase hex chars", ErrInvalidRecord)
+	}
+	if e.ProbaviDigest != nil && !sha256RefPattern.MatchString(*e.ProbaviDigest) {
+		return fmt.Errorf("%w: env.probavi_digest is not a sha256 reference", ErrInvalidRecord)
 	}
 	return nil
 }

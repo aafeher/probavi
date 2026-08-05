@@ -20,6 +20,12 @@ coverage.out
 *.key
 *.pem
 
+# …except the published conformance vectors, which are the point: a third
+# party verifies them offline with the committed public key
+# (evidence-schema.md §12). log_v0 and log_v1 were force-added before this
+# rule existed, so a new one would have been dropped silently.
+!/docs/schemas/evidence/examples/*.jsonl
+
 # Editor/OS noise
 .idea/
 .vscode/

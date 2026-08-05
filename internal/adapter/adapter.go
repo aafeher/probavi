@@ -79,6 +79,16 @@ type Runner struct {
 	opts   Options
 }
 
+// Path is the executable this runner launches, as resolved from the
+// adapter name (§2.1).
+//
+// The core needs it to record which build produced a drill's evidence
+// (evidence-schema.md §3), but the hashing happens there, not here: the
+// "sha256:" form is an evidence-schema convention, and this package
+// deliberately knows nothing about the record format — the same boundary
+// TestEvidenceTimestampFormatMatches guards.
+func (r *Runner) Path() string { return r.path }
+
 // New resolves the adapter name to the executable probavi-adapter-<name> on
 // PATH (§2.1) and returns a Runner for it.
 func New(name string, logger *slog.Logger, opts *Options) (*Runner, error) {

@@ -17,12 +17,17 @@ import (
 
 const (
 	// SchemaID is the evidence schema version this package writes.
-	SchemaID = "probavi-evidence/1"
+	SchemaID = "probavi-evidence/2"
 
-	// SchemaIDv0 is the first published schema version (v1 without
-	// drill.pitr_target). Records declaring it verify forever
-	// (evidence-schema.md §10); they are never rewritten or re-signed.
+	// SchemaIDv0 is the first published version: v1 without
+	// drill.pitr_target.
 	SchemaIDv0 = "probavi-evidence/0"
+
+	// SchemaIDv1 is the second: v2 without adapter.digest and
+	// env.probavi_digest. Records declaring either earlier version verify
+	// forever (evidence-schema.md §10); they are never rewritten or
+	// re-signed.
+	SchemaIDv1 = "probavi-evidence/1"
 
 	// GenesisPrevHash is the prev_hash of the first record in a chain.
 	GenesisPrevHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -62,7 +67,7 @@ func lineHash(line []byte) string {
 // the same list, so what the binary accepts and what the manifest claims
 // cannot drift apart.
 func SchemaIDs() []string {
-	return []string{SchemaIDv0, SchemaID}
+	return []string{SchemaIDv0, SchemaIDv1, SchemaID}
 }
 
 // supportedSchema reports whether a stored record's declared schema version

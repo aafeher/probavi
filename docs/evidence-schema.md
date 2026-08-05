@@ -10,11 +10,9 @@ A machine-readable JSON Schema covering every published version lives at
 `docs/schemas/evidence/record.json` (derived from this document; on any
 disagreement this document wins).
 
-Schema identifier: `probavi-evidence/2`. Verifiers MUST accept every
-published version — `probavi-evidence/0`, `/1` and `/2` (§10). Writers
-still emit v1: the core does not record the v2 digests yet, and the
-version is published first so that verifiers can be updated before any v2
-record exists.
+Schema identifier: `probavi-evidence/2`. Writers emit v2; verifiers MUST
+accept every published version — `probavi-evidence/0`, `/1` and `/2`
+(§10).
 
 ---
 
@@ -350,7 +348,7 @@ Published versions and migration notes:
 |---------|------------------|-----------|
 | `probavi-evidence/0` | v1 without `drill.pitr_target`. | None — v0 records lack the field entirely (fixed shape per version) and remain valid forever under v0. Writers emit v1 from 2026-08-01. |
 | `probavi-evidence/1` | v2 without `adapter.digest` and `env.probavi_digest`. | None — v1 records lack both fields entirely and remain valid forever under v1. |
-| `probavi-evidence/2` | Current (§3). | Both new fields are nullable, so a writer that cannot read an executable still emits a conforming record. **No writer emits v2 yet**; the version is published here so verifiers can be updated first. The obligation in this section — that a verifier support every published version — attaches to v2 from the moment the core can write it, which is a separate change. |
+| `probavi-evidence/2` | Current (§3). | None — both new fields are nullable, so a writer that cannot read an executable still emits a conforming record, and v1 records lack them entirely. Writers emit v2 from 2026-08-05. |
 
 ## 11. v1 freeze
 
@@ -369,10 +367,10 @@ further change to this schema is a version bump (§10).
       Done 2026-08-01; moved out of `internal/` and published as conformance
       vectors 2026-08-02 (§12).
 
-### 11.1 v2 status
+### 11.2 v2 freeze
 
-v2 is **defined but not yet written**. What is done, and what a v2 record
-needs before the core may emit one:
+**v2 is frozen as of 2026-08-05** — every item below is complete. Any
+further change to this schema is a version bump (§10).
 
 - [x] Machine-readable JSON Schema: `recordV2` in
       `docs/schemas/evidence/record.json`, with `internal/spec` proving it
@@ -388,9 +386,18 @@ needs before the core may emit one:
       pins the verifier's supported set to the versions this schema
       publishes, in both directions — §10 as a gate rather than a promise.
       Done 2026-08-05.
-- [ ] Worked example: a byte-exact signed `log_v2.jsonl` beside the v0 and
-      v1 vectors (§12), which requires a writer.
-- [ ] The core populates both digests.
+- [x] Worked example: a byte-exact signed `log_v2.jsonl` beside the v0 and
+      v1 vectors (§12), verified offline in CI with the committed public
+      key — by this repository's writer *and* by the independent verifier,
+      which shares no code with it. The vector deliberately carries both
+      forms: a record with the digests populated, and an infrastructure
+      failure whose `adapter.digest` is null because the adapter never
+      resolved. `log_v1.jsonl` joins `log_v0.jsonl` as byte-frozen: it has
+      no updater and MUST never be regenerated. Done 2026-08-05.
+- [x] The core populates both digests: `adapter.digest` from the
+      executable the protocol client resolved, hashed before launch;
+      `env.probavi_digest` from the running program's own path. A read
+      failure records null and never fails the drill. Done 2026-08-05.
 
 ## 12. Independent verification
 
@@ -429,6 +436,13 @@ notes are collected in `spec/evidence/README.md`.
 
 ## Changelog
 
+- v2 frozen (2026-08-05): the core writes v2, the independent verifier
+  accepts it, and `log_v2.jsonl` joins the published conformance vectors
+  (§11.2). `log_v1.jsonl` is byte-frozen alongside `log_v0.jsonl` — a
+  record written under a published version is never regenerated (§10).
+  The vector carries both forms of the new fields: populated, and a null
+  `adapter.digest` on an infrastructure failure where the adapter never
+  resolved. No byte-level change to anything defined earlier the same day.
 - v2 (2026-08-05): added `adapter.digest` and `env.probavi_digest` —
   nullable `sha256:` references to the adapter executable the core
   launched and to the `probavi` executable that wrote the record.

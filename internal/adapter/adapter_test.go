@@ -538,6 +538,12 @@ func TestNewResolution(t *testing.T) {
 	if r.opts.Grace != defaultGrace {
 		t.Errorf("grace = %v, want default %v", r.opts.Grace, defaultGrace)
 	}
+	// The core hashes this path into adapter.digest, so a runner must
+	// report the file it actually resolved — not the name it was asked for
+	// (evidence-schema.md §3).
+	if r.Path() != path {
+		t.Errorf("Path() = %q, want the resolved executable %q", r.Path(), path)
+	}
 	if _, err := New("definitely-not-installed", nil, nil); err == nil {
 		t.Error("New must fail for unresolvable adapters")
 	}

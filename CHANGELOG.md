@@ -115,6 +115,35 @@ always called out explicitly.
 
 ### Added
 
+- **The core writes evidence schema v2**: every record now carries
+  `adapter.digest` — the adapter executable that performed the restore —
+  and `env.probavi_digest` — the `probavi` binary that signed the result.
+  Schema v2 is frozen (`docs/evidence-schema.md` §11.2).
+
+  A record already named the adapter and its version; it could not say
+  which *build*. Two materially different builds could produce records
+  claiming the same provenance, which is exactly the question an auditor
+  asks when a restore is disputed. `adapter.version` cannot answer it:
+  it is a number the adapter reports about itself.
+
+  **An unreadable executable records null and never fails the drill.** A
+  record with a null digest still proves the restore; a drill that died
+  because a hash could not be taken proves nothing. Both paths are tested.
+
+  The hashing lives on the core side of the adapter boundary. The protocol
+  client exposes the executable it resolved and knows nothing about the
+  record format — `sha256:` is an evidence-schema convention, and
+  `internal/adapter` deliberately does not import `internal/evidence`.
+
+  `log_v2.jsonl` joins the published conformance vectors, carrying both
+  forms deliberately: a record with the digests populated, and an
+  infrastructure failure whose `adapter.digest` is null because the
+  adapter never resolved. It verifies offline with only the committed
+  public key — by this repository's writer *and* by the independent
+  verifier that shares no code with it. `log_v1.jsonl` is byte-frozen
+  alongside `log_v0.jsonl`: a record written under a published version is
+  never regenerated (§10), and a test now holds both.
+
 - **The independent verifier accepts `probavi-evidence/2`**, and a new
   test pins its supported set to the versions the published JSON Schema
   declares — in both directions.

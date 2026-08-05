@@ -100,7 +100,7 @@ func TestGoldenLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	golden := filepath.Join(examplesDir, "log_v1.jsonl")
+	golden := filepath.Join(examplesDir, "log_v2.jsonl")
 	if *updateGolden {
 		if err := os.MkdirAll(examplesDir, 0o755); err != nil {
 			t.Fatalf("mkdir examples: %v", err)
@@ -118,27 +118,32 @@ func TestGoldenLog(t *testing.T) {
 	}
 }
 
-// TestFrozenV0LogVerifies pins schema-version support forever: log_v0.jsonl
-// was written by the probavi-evidence/0 implementation and is byte-frozen —
-// it has no updater and MUST never be regenerated. Records already written
-// under a published version stay verifiable for the lifetime of the product
-// (evidence-schema.md §10).
-func TestFrozenV0LogVerifies(t *testing.T) {
-	f, err := os.Open(filepath.Join(examplesDir, "log_v0.jsonl"))
-	if err != nil {
-		t.Fatalf("open frozen v0 log: %v", err)
-	}
-	defer func() {
-		if err := f.Close(); err != nil {
-			t.Fatalf("close: %v", err)
-		}
-	}()
-	res, err := Verify(f, testKeyring())
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if res.Status != StatusValid || res.Records != 3 {
-		t.Fatalf("frozen v0 log: %s with %d records, want VALID with 3 (%s)", res.Status, res.Records, res.Reason)
+// TestFrozenLogsVerify pins schema-version support forever. log_v0.jsonl
+// and log_v1.jsonl were written by the implementations of their own
+// versions and are byte-frozen — they have no updater and MUST never be
+// regenerated. Records already written under a published version stay
+// verifiable for the lifetime of the product (evidence-schema.md §10), and
+// this is the test that would notice if they stopped.
+func TestFrozenLogsVerify(t *testing.T) {
+	for _, name := range []string{"log_v0.jsonl", "log_v1.jsonl"} {
+		t.Run(name, func(t *testing.T) {
+			f, err := os.Open(filepath.Join(examplesDir, name))
+			if err != nil {
+				t.Fatalf("open frozen log: %v", err)
+			}
+			defer func() {
+				if err := f.Close(); err != nil {
+					t.Fatalf("close: %v", err)
+				}
+			}()
+			res, err := Verify(f, testKeyring())
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			if res.Status != StatusValid || res.Records != 3 {
+				t.Fatalf("%s: %s with %d records, want VALID with 3 (%s)", name, res.Status, res.Records, res.Reason)
+			}
+		})
 	}
 }
 
@@ -155,7 +160,7 @@ func TestWorkedExampleVerifiesWithCommittedKey(t *testing.T) {
 	if got, want := PublicKeyID(pub), testSigner().KeyID(); got != want {
 		t.Fatalf("committed key id %s does not match the golden signer %s", got, want)
 	}
-	for _, golden := range []string{"log_v0.jsonl", "log_v1.jsonl"} {
+	for _, golden := range []string{"log_v0.jsonl", "log_v1.jsonl", "log_v2.jsonl"} {
 		f, err := os.Open(filepath.Join(examplesDir, golden))
 		if err != nil {
 			t.Fatalf("open %s: %v", golden, err)
