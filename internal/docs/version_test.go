@@ -2,6 +2,7 @@ package docs_test
 
 import (
 	"regexp"
+	"strconv"
 	"testing"
 )
 
@@ -43,10 +44,6 @@ var versionClaims = []versionClaim{
 		regexp.MustCompile(`\$ tag=v(\d+\.\d+\.\d+) `)},
 	{sourceDoc, "the packaged install example",
 		regexp.MustCompile(`probavi_(\d+\.\d+\.\d+)_amd64\.deb`)},
-	{sourceDoc, "the independent verifier's pinned tag",
-		regexp.MustCompile(`probavi-evidence-verify@v(\d+\.\d+\.\d+)`)},
-	{"spec/evidence/README.md", "the independent verifier's pinned tag",
-		regexp.MustCompile(`probavi-evidence-verify@v(\d+\.\d+\.\d+)`)},
 	{"docs/docker.md", "the image tag",
 		regexp.MustCompile(`ghcr\.io/probavi/probavi:(\d+\.\d+\.\d+)`)},
 	{"docs/docker.md", "the reproduce-the-image build argument",
@@ -106,5 +103,69 @@ func TestBinaryVersionTracksTheChangelog(t *testing.T) {
 	if want := currentVersion(t); m[1] != want {
 		t.Errorf("%s stamps %s-dev, but CHANGELOG.md released %s — a signed record would "+
 			"name the wrong build", source, m[1], want)
+	}
+}
+
+// verifierTag matches a published tag of the independent verifier module.
+var verifierTag = regexp.MustCompile(`spec/evidence/v(\d+)\.(\d+)\.(\d+)`)
+
+// verifierPin matches the version the documentation tells people to pin.
+var verifierPin = regexp.MustCompile(`probavi-evidence-verify@v(\d+\.\d+\.\d+)`)
+
+// newestVerifierVersion is the highest spec/evidence tag CHANGELOG.md
+// names. Highest, not first: the entry announcing v0.2.0 sits above the
+// one announcing v0.3.0, because both belong to the same release and the
+// older one was written first.
+func newestVerifierVersion(t *testing.T) string {
+	t.Helper()
+	var best [3]int
+	var found string
+	for _, m := range verifierTag.FindAllStringSubmatch(read(t, "CHANGELOG.md"), -1) {
+		var v [3]int
+		for i := range v {
+			n, err := strconv.Atoi(m[i+1])
+			if err != nil {
+				t.Fatalf("unparseable verifier tag %q: %v", m[0], err)
+			}
+			v[i] = n
+		}
+		if v[0] > best[0] ||
+			(v[0] == best[0] && v[1] > best[1]) ||
+			(v[0] == best[0] && v[1] == best[1] && v[2] > best[2]) {
+			best, found = v, m[1]+"."+m[2]+"."+m[3]
+		}
+	}
+	if found == "" {
+		t.Fatal("CHANGELOG.md names no spec/evidence tag — this gate would pass vacuously")
+	}
+	return found
+}
+
+// TestVerifierPinMatchesItsOwnNewestTag holds the documented `go install`
+// of the independent verifier to the newest version of *that module*.
+//
+// It deliberately does not track the release version. spec/evidence is a
+// separate Go module with its own tags precisely so it can move when the
+// verifier changes and stay still when it does not — 0.3.1 fixes a
+// container image and leaves the verifier untouched, so its pin must
+// remain v0.3.0. Tying the two together would have forced a meaningless
+// module tag on every release, and a wrong pin is worse than a stale one:
+// the module proxy records a version permanently, so an install command
+// naming a tag that was never cut cannot be repaired afterwards.
+func TestVerifierPinMatchesItsOwnNewestTag(t *testing.T) {
+	want := newestVerifierVersion(t)
+	for _, file := range []string{sourceDoc, "spec/evidence/README.md"} {
+		t.Run(file, func(t *testing.T) {
+			matches := verifierPin.FindAllStringSubmatch(read(t, file), -1)
+			if len(matches) == 0 {
+				t.Fatalf("%s no longer shows how to install the independent verifier", file)
+			}
+			for _, m := range matches {
+				if m[1] != want {
+					t.Errorf("%s pins the verifier at v%s, but the newest tag CHANGELOG.md "+
+						"names is v%s", file, m[1], want)
+				}
+			}
+		})
 	}
 }
