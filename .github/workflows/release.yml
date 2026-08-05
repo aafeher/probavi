@@ -28,29 +28,63 @@ jobs:
         run: go build ./... && go vet ./...
 
       - name: build reproducible artifacts
-        # CGO off, -trimpath, and an empty build id make the binary depend
+        # CGO off, -trimpath, and an empty build id make each binary depend
         # only on the source tree and the Go toolchain; the tar/gzip flags
         # make the archives deterministic too. Anyone can rebuild and
         # compare against SHA256SUMS — the instructions ship in the
         # release notes.
+        #
+        # One archive per binary, never a bundle. The core resolves
+        # probavi-adapter-<name> on PATH (AGENTS.md §2.1), so an adapter is
+        # a separately installable thing, and packaging follows the same
+        # split. It also keeps AGENTS.md §6 open: if adapters ever move to
+        # their own repositories, these artifact names do not change.
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
-            goos="${target%/*}"
-            goarch="${target#*/}"
-            name="probavi_${VERSION}_${goos}_${goarch}"
+
+          # pack <binary> <go-package> <ldflags> <extra doc>...
+          # goos/goarch come from the platform loop below.
+          pack() {
+            bin="$1"; pkg="$2"; ldflags="$3"; shift 3
+            name="${bin}_${VERSION}_${goos}_${goarch}"
             outdir="dist/${name}"
             mkdir -p "${outdir}"
             CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
-              go build -trimpath -ldflags "-s -w -buildid= -X main.version=${VERSION}" \
-              -o "${outdir}/probavi" ./cmd/probavi
-            cp LICENSE README.md CHANGELOG.md "${outdir}/"
+              go build -trimpath -ldflags "${ldflags}" -o "${outdir}/${bin}" "${pkg}"
+            cp LICENSE "$@" "${outdir}/"
             tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' \
               -cf - -C "${outdir}" . | gzip -n -9 > "dist/${name}.tar.gz"
             rm -r "${outdir}"
+          }
+
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+
+            pack probavi ./cmd/probavi \
+              "-s -w -buildid= -X main.version=${VERSION}" \
+              README.md CHANGELOG.md
+
+            # Adapters deliberately get no -X main.version. Their version is
+            # the adapterVersion const they report through the protocol,
+            # which lands in every signed evidence record as adapter.version
+            # and moves independently of this tag; a second, disagreeing
+            # number on the same binary would be worse than none. The symbol
+            # does not exist either, and -X on a missing symbol is silent.
+            #
+            # The glob is the registry: every adapter directory ships, and
+            # internal/docs holds that set to docs/capabilities.json so an
+            # undeclared binary cannot slip into a release.
+            for dir in adapters/*/; do
+              id="${dir#adapters/}"
+              id="${id%/}"
+              pack "probavi-adapter-${id}" "./${dir%/}" \
+                "-s -w -buildid=" "${dir}README.md"
+            done
           done
+
           (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
           cat dist/SHA256SUMS
 
@@ -62,6 +96,21 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           {
             echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) for everything in ${GITHUB_REF_NAME}."
+            echo
+            echo "## What to download"
+            echo
+            echo "One archive per binary, for Linux and macOS on amd64 and arm64."
+            echo "\`probavi\` is the orchestrator: it resolves \`probavi-adapter-<engine>\`"
+            echo "on \`PATH\`, so take the core **plus an adapter for each engine you drill**."
+            echo
+            jq -r '.adapters[] | "- `probavi-adapter-\(.id)` — \(.name), adapter version `\(.adapter_version)`"' \
+              docs/capabilities.json
+            echo
+            echo "The adapter version above is what that adapter reports through the"
+            echo "protocol and what every signed evidence record carries as"
+            echo "\`adapter.version\`. It moves independently of this release tag —"
+            echo "the compatibility contract between core and adapter is the adapter"
+            echo "protocol version, negotiated at handshake, not either version number."
             echo
             echo "## Verify the download"
             echo
@@ -75,12 +124,20 @@ jobs:
             echo
             echo '```sh'
             echo "git checkout ${GITHUB_REF_NAME}"
+            echo
+            echo "# the core"
             echo "CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> \\"
             echo "  go build -trimpath -ldflags \"-s -w -buildid= -X main.version=${VERSION}\" \\"
             echo "  -o probavi ./cmd/probavi"
+            echo
+            echo "# an adapter — no -X, and -o is required because go build would"
+            echo "# otherwise name the binary after its directory"
+            echo "CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> \\"
+            echo "  go build -trimpath -ldflags \"-s -w -buildid=\" \\"
+            echo "  -o probavi-adapter-postgres ./adapters/postgres"
             echo '```'
             echo
-            echo "The result matches the \`probavi\` binary inside the corresponding archive."
+            echo "Each result matches the binary inside the corresponding archive."
           } > notes.md
           gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/SHA256SUMS \
             --draft --verify-tag --title "probavi ${GITHUB_REF_NAME}" --notes-file notes.md

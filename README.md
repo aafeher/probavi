@@ -24,7 +24,7 @@ The output is not a green checkmark. It is an auditable, cryptographically verif
 
 ## Status
 
-**Pre-alpha, working end to end for PostgreSQL, MySQL, MongoDB, and SQL Server.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`, `mongodump` archives), native SQL Server `.bak` files, and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container, Kubernetes Job, or a bare host over SSH), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative and frozen, with machine-readable JSON Schemas in [docs/schemas/](docs/schemas/); third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. What exactly ships, in machine-readable form, is [docs/capabilities.json](docs/capabilities.json): generated from the code that implements each capability, regenerated and diff-checked by CI, and the source anything republishing Probavi's capabilities should read instead of this paragraph ([contract](docs/capabilities.md)). Released as **v0.2.0**: reproducible binaries for Linux and macOS (amd64/arm64) with checksums on the [releases page](https://github.com/probavi/probavi/releases) — pre-1.0, minor versions may break, every change is in [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
+**Pre-alpha, working end to end for PostgreSQL, MySQL, MongoDB, and SQL Server.** `probavi run` restores real backups — logical dumps (`pg_dump`, `mysqldump`, `mongodump` archives), native SQL Server `.bak` files, and physical backups (pgBackRest, Percona XtraBackup) — into a disposable sandbox (Docker container, Kubernetes Job, or a bare host over SSH), validates them, and appends a signed evidence record; `probavi evidence verify` proves the log offline. Point-in-time recovery drills ("prove we can restore to 24 hours ago") work on pgBackRest sources, and the record carries the exact instant proven. The adapter protocol (v0) and evidence schema (v1) specs in `docs/` are normative and frozen, with machine-readable JSON Schemas in [docs/schemas/](docs/schemas/); third parties can build adapters in any language from [docs/adapter-development.md](docs/adapter-development.md) and validate them with `probavi adapter conformance` — no container runtime needed. What exactly ships, in machine-readable form, is [docs/capabilities.json](docs/capabilities.json): generated from the code that implements each capability, regenerated and diff-checked by CI, and the source anything republishing Probavi's capabilities should read instead of this paragraph ([contract](docs/capabilities.md)). Released as **v0.2.0**: reproducible binaries for Linux and macOS (amd64/arm64), the core and each adapter as its own archive, with checksums on the [releases page](https://github.com/probavi/probavi/releases) — pre-1.0, minor versions may break, every change is in [CHANGELOG.md](CHANGELOG.md). See [ROADMAP.md](ROADMAP.md) and [AGENTS.md](AGENTS.md).
 
 ## Shape
 
@@ -65,9 +65,29 @@ $ probavi evidence verify --log /var/lib/probavi/evidence.jsonl --key /etc/proba
 
 Exit codes are the cron/CI contract: `0` backup proven restorable, `1` recoverability failure, `2` infrastructure error, `5` evidence record could not be written.
 
+## Install
+
+Every release publishes **one archive per binary** for Linux and macOS (amd64/arm64), with a `SHA256SUMS` covering all of them, on the [releases page](https://github.com/probavi/probavi/releases). `probavi` is the orchestrator: it resolves `probavi-adapter-<engine>` on your `PATH`, so take the core **plus an adapter for each engine you drill**.
+
+```console
+$ tag=v0.2.0 os=linux arch=amd64
+$ base="https://github.com/probavi/probavi/releases/download/${tag}"
+$ curl -fsSLO "${base}/probavi_${tag#v}_${os}_${arch}.tar.gz"
+$ curl -fsSLO "${base}/probavi-adapter-postgres_${tag#v}_${os}_${arch}.tar.gz"
+$ curl -fsSLO "${base}/SHA256SUMS"
+$ sha256sum -c SHA256SUMS --ignore-missing
+$ tar -xzf "probavi_${tag#v}_${os}_${arch}.tar.gz" ./probavi
+$ tar -xzf "probavi-adapter-postgres_${tag#v}_${os}_${arch}.tar.gz" ./probavi-adapter-postgres
+$ sudo install -m0755 probavi probavi-adapter-postgres /usr/local/bin/
+```
+
+Adapters ship for `postgres`, `mysql`, `mongodb`, and `mssql`. Both binaries must sit on the same `PATH`: the core launches the adapter as a child process and finds it by name. Each adapter carries its own version — the one it reports through the protocol and that every evidence record stores as `adapter.version` — which moves independently of the release tag; the compatibility contract between core and adapter is the adapter protocol version, negotiated at handshake. The release notes list both.
+
+Verifying an evidence log needs nothing else: `probavi evidence verify` reads a log and a public key, so an auditor installs the core alone.
+
 ## Quickstart
 
-Prove a PostgreSQL backup restorable in about five minutes. You need Go 1.24+, Docker, and a `pg_dump` custom-format (`-Fc`) backup file.
+Prove a PostgreSQL backup restorable in about five minutes, building from source — or install the release binaries above and skip the `go build` steps. You need Go 1.24+, Docker, and a `pg_dump` custom-format (`-Fc`) backup file.
 
 ```console
 $ git clone https://github.com/probavi/probavi.git && cd probavi
