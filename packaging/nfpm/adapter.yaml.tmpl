@@ -1,0 +1,40 @@
+# nfpm input for one engine adapter, rendered once per adapter. See
+# probavi.yaml.tmpl for why the whole file is rendered with envsubst
+# rather than relying on nfpm's own variable expansion.
+#
+# Variables: ADAPTER, ENGINE, VERSION, ARCH, BIN_DIR.
+
+name: probavi-adapter-${ADAPTER}
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: Ákos Fehér <aafeher@gmail.com>
+vendor: Probavi
+homepage: https://probavi.dev
+license: Apache-2.0
+description: |
+  Probavi engine adapter for ${ENGINE}.
+  Restores ${ENGINE} backups into a disposable sandbox on behalf of the
+  probavi orchestrator, which launches it as a child process and speaks
+  the adapter protocol over stdio.
+  .
+  The engine's own tools run inside the sandbox image, not on this host,
+  so this package installs no ${ENGINE} client.
+
+contents:
+  # On PATH beside the core, which finds it by name.
+  - src: ${BIN_DIR}/probavi-adapter-${ADAPTER}
+    dst: /usr/bin/probavi-adapter-${ADAPTER}
+  - src: LICENSE
+    dst: /usr/share/doc/probavi-adapter-${ADAPTER}/LICENSE
+  - src: adapters/${ADAPTER}/README.md
+    dst: /usr/share/doc/probavi-adapter-${ADAPTER}/README.md
+
+# Unversioned on purpose. The compatibility contract between core and
+# adapter is the adapter protocol version, negotiated at handshake — not
+# either package version — which is what keeps per-adapter repositories
+# possible later (AGENTS.md §6).
+depends:
+  - probavi

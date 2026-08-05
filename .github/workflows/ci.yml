@@ -225,3 +225,65 @@ jobs:
         # builds publishing the same version leave an auditor unable to
         # tell them apart, so changing one without the other blocks merge.
         run: go run ./internal/tools/adapterversion -base "${{ github.event.pull_request.base.sha }}"
+
+  packages:
+    name: Linux packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: build the packages
+        # Pinned by module version, so the proxy and checksum database
+        # verify the tool (no curl|sh). Exactly the script the release
+        # runs, so what is proven here is what ships.
+        run: |
+          set -euo pipefail
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          mkdir -p dist/pkgroot
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -buildid= -X main.version=ci" \
+            -o dist/pkgroot/probavi ./cmd/probavi
+          for dir in adapters/*/; do
+            id="${dir#adapters/}"; id="${id%/}"
+            CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -buildid=" \
+              -o "dist/pkgroot/probavi-adapter-${id}" "./${dir%/}"
+          done
+          VERSION=0.0.0 ARCH=amd64 packaging/build-packages.sh dist/pkgroot dist/pkgs
+          ls -1 dist/pkgs
+
+      # Building a package proves nothing about whether it works. The
+      # failure this exists to catch installs cleanly and leaves the
+      # adapter where the core's PATH lookup will never find it, so every
+      # family gets installed and asked to resolve an adapter for real.
+      - name: install and run on Debian
+        run: |
+          docker run --rm -v "$PWD/dist/pkgs:/pkgs:ro" debian:stable-slim sh -eus <<'SH'
+            apt-get update -qq
+            apt-get install -y -qq /pkgs/probavi_0.0.0_amd64.deb /pkgs/probavi-adapter-postgres_0.0.0_amd64.deb
+            command -v probavi
+            command -v probavi-adapter-postgres
+            probavi adapter probe postgres | grep -q '"name":"postgres"'
+            apt-get remove -y -qq probavi-adapter-postgres probavi
+            test ! -e /usr/bin/probavi
+          SH
+
+      - name: install and run on Fedora
+        run: |
+          docker run --rm -v "$PWD/dist/pkgs:/pkgs:ro" fedora:latest sh -eus <<'SH'
+            dnf install -y -q /pkgs/probavi-0.0.0-1.x86_64.rpm /pkgs/probavi-adapter-postgres-0.0.0-1.x86_64.rpm
+            probavi adapter probe postgres | grep -q '"name":"postgres"'
+            rpm -q --requires probavi-adapter-postgres | grep -qx probavi
+            dnf remove -y -q probavi-adapter-postgres probavi
+          SH
+
+      - name: install and run on Alpine
+        run: |
+          docker run --rm -v "$PWD/dist/pkgs:/pkgs:ro" alpine:3.22 sh -eus <<'SH'
+            apk add --no-cache --allow-untrusted /pkgs/probavi_0.0.0_x86_64.apk /pkgs/probavi-adapter-postgres_0.0.0_x86_64.apk
+            probavi adapter probe postgres | grep -q '"name":"postgres"'
+            apk del probavi-adapter-postgres probavi
+            test ! -e /usr/bin/probavi
+          SH
