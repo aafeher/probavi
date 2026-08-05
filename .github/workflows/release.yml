@@ -100,7 +100,8 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          # See ci.yml: pinned to the newest nfpm the go.mod toolchain builds.
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
           for goarch in amd64 arm64; do
             rm -rf dist/pkgroot && mkdir -p dist/pkgroot
             CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" \

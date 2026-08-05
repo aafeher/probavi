@@ -242,7 +242,11 @@ jobs:
         # runs, so what is proven here is what ships.
         run: |
           set -euo pipefail
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          # Pinned to the newest nfpm whose own go directive the toolchain
+          # in go.mod can still build: v2.47.0 requires Go 1.26.4, and
+          # setup-go pins GOTOOLCHAIN=local on purpose. Bump this when the
+          # project's Go version moves, not before.
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
           mkdir -p dist/pkgroot
           CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -buildid= -X main.version=ci" \
             -o dist/pkgroot/probavi ./cmd/probavi
