@@ -126,7 +126,7 @@ func TestNoVolatileFields(t *testing.T) {
 var timestampPattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}`)
 
 // devVersionPattern matches the binary's development version stamp
-// (`0.2.0-dev`), whatever release it currently trails.
+// (`0.3.0-dev`), whatever release it currently trails.
 var devVersionPattern = regexp.MustCompile(`\d+\.\d+\.\d+-dev`)
 
 // TestAdaptersTrackTheRepository proves the adapter list is discovered,

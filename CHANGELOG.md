@@ -11,6 +11,8 @@ always called out explicitly.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-05
+
 ### Added
 
 - Translated README introductions in Hungarian, German, French, and
@@ -52,6 +54,14 @@ always called out explicitly.
   ```
 
   `@latest` keeps working and stays the recommended default for casual use.
+
+- **`spec/evidence/v0.3.0`** — the independent verifier is retagged with
+  this release because it changed materially: it accepts
+  `probavi-evidence/2`, which the core now writes. Pinning
+  `spec/evidence/v0.2.0` would pin a verifier that rejects every record
+  produced from this release onward. The two tags move together from now
+  on whenever the verifier changes; the schema version, not either tag,
+  remains the compatibility contract (evidence-schema.md §10).
 
 ### Changed
 
@@ -961,6 +971,7 @@ First tagged release. Everything below is new.
 - `probavi version`: prints the binary version and the contract versions
   the build speaks.
 
-[Unreleased]: https://github.com/probavi/probavi/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/probavi/probavi/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/probavi/probavi/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/probavi/probavi/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/probavi/probavi/releases/tag/v0.1.0
