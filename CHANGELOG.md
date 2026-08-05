@@ -11,6 +11,20 @@ always called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The container image stamped its binary with the git tag**, so
+  `probavi version` reported `probavi v0.3.0` inside the image while the
+  archives and packages of the same release reported `probavi 0.3.0`.
+  That stamp is what a drill signs into every record as
+  `env.probavi_version`, so one release produced two spellings of itself
+  in an audit trail — and `docs/docker.md` §3 documented the output
+  without the `v`, which made the document wrong rather than the image.
+
+  The same mistake as the image *tag* fixed a moment earlier, in the
+  second place it appears: the tag was corrected, the build argument next
+  to it was not. The gate now covers both.
+
 ## [0.3.0] - 2026-08-05
 
 ### Added

@@ -298,7 +298,13 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: VERSION=${{ github.ref_name }}
+          # The version, not the git tag. Passing ref_name stamped the
+          # binary inside the image "v0.3.0" while the archives and
+          # packages of the same release stamped "0.3.0" — and that stamp
+          # is what a drill signs into every record as env.probavi_version,
+          # so one release would have produced two spellings of itself in
+          # an audit trail.
+          build-args: VERSION=${{ steps.version.outputs.value }}
           # Without the leading "v", matching the release archives and
           # what docs/docker.md tells people to pull. github.ref_name is
           # the tag, so using it raw published probavi:v0.3.0 while every
