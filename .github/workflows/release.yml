@@ -127,11 +127,27 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           curl -fsSLo source.tar.gz \
             "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
-          export PKGVER="${VERSION}"
           export SOURCE_SHA256="$(sha256sum source.tar.gz | cut -d' ' -f1)"
-          envsubst < packaging/aur/PKGBUILD.tmpl > dist/PKGBUILD
-          envsubst < packaging/gentoo/app-backup/probavi/probavi-9999.ebuild.tmpl \
-            > "dist/probavi-${VERSION}.ebuild"
+
+          # Both package managers refuse a version containing a hyphen, so
+          # a pre-release tag needs their own spelling: makepkg rejects any
+          # hyphen in pkgver, and portage's grammar wants _rc1 rather than
+          # -rc.1. Only the version string changes; SRC_URI keeps the real
+          # tag, which is what the tarball is published under. nfpm handles
+          # this itself, emitting ~rc.1 for deb and rpm — the form that
+          # sorts *before* the final release, which is what a pre-release
+          # must do. A final version passes through both untouched.
+          arch_ver="$(printf '%s' "${VERSION}" | sed 's/-//; s/\([a-z]\)\./\1/')"
+          gentoo_ver="$(printf '%s' "${VERSION}" | sed 's/-/_/; s/\(_[a-z]*\)\./\1/')"
+          echo "recipe versions: arch=${arch_ver} gentoo=${gentoo_ver}"
+
+          PKGVER="${arch_ver}" TAG="${GITHUB_REF_NAME}" SRCVER="${VERSION}" \
+            envsubst '${PKGVER} ${SOURCE_SHA256} ${TAG} ${SRCVER}' \
+            < packaging/aur/PKGBUILD.tmpl > dist/PKGBUILD
+          TAG="${GITHUB_REF_NAME}" SRCVER="${VERSION}" \
+            envsubst '${TAG} ${SRCVER}' \
+            < packaging/gentoo/app-backup/probavi/probavi-9999.ebuild.tmpl \
+            > "dist/probavi-${gentoo_ver}.ebuild"
           rm -f source.tar.gz
 
       - name: checksum every artifact

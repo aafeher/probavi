@@ -31,7 +31,11 @@ render_and_pack() {
   # variables in a content src or dst, and gets that wrong silently — the
   # package builds and installs with the binary at a literal ${VAR} path,
   # where the core's PATH lookup will never find it.
-  envsubst < "${template}" > "${rendered}"
+  #
+  # The variable list is not optional. Without it envsubst substitutes
+  # *every* ${...} it sees, including shell variables that belong to the
+  # rendered file, replacing the unset ones with nothing.
+  envsubst '${VERSION} ${ARCH} ${BIN_DIR} ${ADAPTER} ${ENGINE}' < "${template}" > "${rendered}"
   for format in deb rpm apk; do
     nfpm package -f "${rendered}" -p "${format}" -t "${OUT_DIR}"
   done

@@ -15,7 +15,11 @@ inherit go-module
 
 DESCRIPTION="Continuous restore verification for database backups"
 HOMEPAGE="https://probavi.dev"
-SRC_URI="https://github.com/probavi/probavi/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz"
+# The upstream version differs from PV for a pre-release: portage wants
+# 0.3.0_rc1 while the tag is v0.3.0-rc.1.
+MY_PV="${SRCVER}"
+SRC_URI="https://github.com/probavi/probavi/archive/refs/tags/${TAG}.tar.gz -> ${P}.tar.gz"
+S="${WORKDIR}/${PN}-${MY_PV}"
 
 LICENSE="Apache-2.0"
 SLOT="0"
@@ -29,7 +33,7 @@ RDEPEND=""
 BDEPEND=">=dev-lang/go-1.24"
 
 src_compile() {
-	local ldflags="-s -w -buildid= -X main.version=${PV}"
+	local ldflags="-s -w -buildid= -X main.version=${MY_PV}"
 	ego build -trimpath -ldflags "${ldflags}" -o probavi ./cmd/probavi
 
 	# No -X main.version for adapters: each reports its own adapterVersion,
