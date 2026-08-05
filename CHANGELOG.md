@@ -11,6 +11,30 @@ always called out explicitly.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The rendered `PKGBUILD` and ebuild were unusable**, and would have
+  shipped attached to the first release that produced them. `envsubst`
+  with no argument substitutes *every* `${...}` it finds and replaces the
+  unset ones with nothing, so a PKGBUILD came out with `${pkgdir}`,
+  `${srcdir}` and `${pkgbase}` erased — `cd "/probavi-"`, a download URL
+  with no version in it, `-X main.version=`. It built cleanly into a
+  release asset; the first person to notice would have been an Arch user
+  running `makepkg`. Every render now names the variables it fills.
+
+- **A pre-release tag produced invalid recipes.** `makepkg` rejects a
+  hyphen in `pkgver` and portage's grammar wants `_rc1`, so `0.3.0-rc.1`
+  is renamed to `0.3.0rc1` and `0.3.0_rc1` for those two — while the
+  download URL keeps the tag that was actually pushed, which the naive
+  rename would have broken. `nfpm` needed nothing: it already emits
+  `~rc.1`, the form that sorts *before* the final release. Found by
+  rendering the recipes for a release-candidate tag before cutting one.
+
+  Three gates: a recipe must survive rendering with its own shell
+  variables intact, every `envsubst` call must carry a SHELL-FORMAT
+  argument, and a source recipe must build its download URL from the tag
+  rather than from the version.
+
 ## [0.3.0] - 2026-08-05
 
 ### Added

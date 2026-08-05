@@ -38,7 +38,8 @@ export VERSION
 SHA_ARM64="$(sha_of "probavi_${VERSION}_darwin_arm64.tar.gz")"
 SHA_AMD64="$(sha_of "probavi_${VERSION}_darwin_amd64.tar.gz")"
 export SHA_ARM64 SHA_AMD64
-envsubst < packaging/homebrew/probavi.rb.tmpl > "${OUT_DIR}/probavi.rb"
+envsubst '${VERSION} ${SHA_ARM64} ${SHA_AMD64}' \
+  < packaging/homebrew/probavi.rb.tmpl > "${OUT_DIR}/probavi.rb"
 
 for dir in adapters/*/; do
   id="${dir#adapters/}"
@@ -52,5 +53,6 @@ for dir in adapters/*/; do
   SHA_ARM64="$(sha_of "probavi-adapter-${ADAPTER}_${VERSION}_darwin_arm64.tar.gz")"
   SHA_AMD64="$(sha_of "probavi-adapter-${ADAPTER}_${VERSION}_darwin_amd64.tar.gz")"
   export ADAPTER ENGINE CLASS SHA_ARM64 SHA_AMD64
-  envsubst < packaging/homebrew/adapter.rb.tmpl > "${OUT_DIR}/probavi-adapter-${ADAPTER}.rb"
+  envsubst '${VERSION} ${SHA_ARM64} ${SHA_AMD64} ${ADAPTER} ${ENGINE} ${CLASS}' \
+    < packaging/homebrew/adapter.rb.tmpl > "${OUT_DIR}/probavi-adapter-${ADAPTER}.rb"
 done

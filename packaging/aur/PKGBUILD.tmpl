@@ -14,20 +14,25 @@ pkgname=('probavi' 'probavi-adapter-postgres' 'probavi-adapter-mysql'
          'probavi-adapter-mongodb' 'probavi-adapter-mssql')
 pkgver=${PKGVER}
 pkgrel=1
+# The git tag, which differs from pkgver for a pre-release: makepkg
+# forbids a hyphen in pkgver, so 0.3.0-rc.1 becomes 0.3.0rc1 above while
+# the tarball stays where it was published.
+_tag=${TAG}
+_srcver=${SRCVER}
 pkgdesc='Continuous restore verification for database backups'
 arch=('x86_64' 'aarch64')
 url='https://probavi.dev'
 license=('Apache-2.0')
 makedepends=('go')
-source=("${pkgbase}-${pkgver}.tar.gz::https://github.com/probavi/probavi/archive/refs/tags/v${pkgver}.tar.gz")
+source=("${pkgbase}-${pkgver}.tar.gz::https://github.com/probavi/probavi/archive/refs/tags/${_tag}.tar.gz")
 sha256sums=('${SOURCE_SHA256}')
 
 build() {
-  cd "${srcdir}/probavi-${pkgver}"
+  cd "${srcdir}/probavi-${_srcver}"
   export CGO_ENABLED=0 GOFLAGS='-trimpath -mod=readonly -modcacherw'
   # The same flags the release archives use, so a package built here and a
   # downloaded binary are the same bytes.
-  go build -ldflags "-s -w -buildid= -X main.version=${pkgver}" -o build/probavi ./cmd/probavi
+  go build -ldflags "-s -w -buildid= -X main.version=${_srcver}" -o build/probavi ./cmd/probavi
   # Adapters carry no -X main.version: each reports its own adapterVersion,
   # which reaches every signed evidence record as adapter.version.
   for dir in adapters/*/; do
@@ -37,7 +42,7 @@ build() {
 }
 
 check() {
-  cd "${srcdir}/probavi-${pkgver}"
+  cd "${srcdir}/probavi-${_srcver}"
   go test ./...
 }
 
@@ -47,7 +52,7 @@ package_probavi() {
               'openssh: remotehost sandbox provider, and DOCKER_HOST=ssh://'
               'kubectl: kubernetes sandbox provider'
               'ca-certificates: HTTPS webhook notifications')
-  cd "${srcdir}/probavi-${pkgver}"
+  cd "${srcdir}/probavi-${_srcver}"
   # /usr/bin, never a helper directory off PATH: the core resolves
   # adapters with exec.LookPath.
   install -Dm755 build/probavi "${pkgdir}/usr/bin/probavi"
@@ -61,7 +66,7 @@ _package_adapter() {
   # Unversioned: the compatibility contract is the adapter protocol
   # version negotiated at handshake, not either package version.
   depends=('probavi')
-  cd "${srcdir}/probavi-${pkgver}"
+  cd "${srcdir}/probavi-${_srcver}"
   install -Dm755 "build/probavi-adapter-${id}" "${pkgdir}/usr/bin/probavi-adapter-${id}"
   install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/probavi-adapter-${id}/LICENSE"
   install -Dm644 "adapters/${id}/README.md" "${pkgdir}/usr/share/doc/probavi-adapter-${id}/README.md"
