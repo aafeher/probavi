@@ -1,0 +1,73 @@
+# Maintainer: Ákos Fehér <aafeher@gmail.com>
+#
+# Rendered by the release workflow with the tag and the source tarball's
+# checksum, then published to the AUR. The AUR wants an SSH key that
+# cannot be scoped to one repository, so that last step is deliberately
+# manual — CI generates and validates this file, a human pushes it.
+#
+# A split package, because the core and the adapters are separate things:
+# `probavi` alone cannot run a drill (it resolves probavi-adapter-<engine>
+# on PATH), and it is all an auditor needs to verify a log.
+
+pkgbase=probavi
+pkgname=('probavi' 'probavi-adapter-postgres' 'probavi-adapter-mysql'
+         'probavi-adapter-mongodb' 'probavi-adapter-mssql')
+pkgver=${PKGVER}
+pkgrel=1
+pkgdesc='Continuous restore verification for database backups'
+arch=('x86_64' 'aarch64')
+url='https://probavi.dev'
+license=('Apache-2.0')
+makedepends=('go')
+source=("${pkgbase}-${pkgver}.tar.gz::https://github.com/probavi/probavi/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('${SOURCE_SHA256}')
+
+build() {
+  cd "${srcdir}/probavi-${pkgver}"
+  export CGO_ENABLED=0 GOFLAGS='-trimpath -mod=readonly -modcacherw'
+  # The same flags the release archives use, so a package built here and a
+  # downloaded binary are the same bytes.
+  go build -ldflags "-s -w -buildid= -X main.version=${pkgver}" -o build/probavi ./cmd/probavi
+  # Adapters carry no -X main.version: each reports its own adapterVersion,
+  # which reaches every signed evidence record as adapter.version.
+  for dir in adapters/*/; do
+    id="${dir#adapters/}"; id="${id%/}"
+    go build -ldflags '-s -w -buildid=' -o "build/probavi-adapter-${id}" "./${dir%/}"
+  done
+}
+
+check() {
+  cd "${srcdir}/probavi-${pkgver}"
+  go test ./...
+}
+
+package_probavi() {
+  optdepends=('docker: docker sandbox provider'
+              'podman-docker: docker sandbox provider via podman'
+              'openssh: remotehost sandbox provider, and DOCKER_HOST=ssh://'
+              'kubectl: kubernetes sandbox provider'
+              'ca-certificates: HTTPS webhook notifications')
+  cd "${srcdir}/probavi-${pkgver}"
+  # /usr/bin, never a helper directory off PATH: the core resolves
+  # adapters with exec.LookPath.
+  install -Dm755 build/probavi "${pkgdir}/usr/bin/probavi"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/probavi/LICENSE"
+  install -Dm644 README.md "${pkgdir}/usr/share/doc/probavi/README.md"
+}
+
+_package_adapter() {
+  local id="$1"
+  pkgdesc="Probavi engine adapter for ${id}"
+  # Unversioned: the compatibility contract is the adapter protocol
+  # version negotiated at handshake, not either package version.
+  depends=('probavi')
+  cd "${srcdir}/probavi-${pkgver}"
+  install -Dm755 "build/probavi-adapter-${id}" "${pkgdir}/usr/bin/probavi-adapter-${id}"
+  install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/probavi-adapter-${id}/LICENSE"
+  install -Dm644 "adapters/${id}/README.md" "${pkgdir}/usr/share/doc/probavi-adapter-${id}/README.md"
+}
+
+package_probavi-adapter-postgres() { _package_adapter postgres; }
+package_probavi-adapter-mysql()    { _package_adapter mysql; }
+package_probavi-adapter-mongodb()  { _package_adapter mongodb; }
+package_probavi-adapter-mssql()    { _package_adapter mssql; }

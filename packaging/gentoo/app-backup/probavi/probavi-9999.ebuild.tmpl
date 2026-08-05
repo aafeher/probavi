@@ -1,0 +1,65 @@
+# Copyright 2026 Ákos Fehér
+# Distributed under the terms of the Apache License 2.0
+#
+# Rendered by the release workflow into probavi-${PKGVER}.ebuild and
+# attached to the release; publishing it to an overlay is the maintainer's
+# step (see docs/packaging.md).
+#
+# Adapters are USE flags rather than separate packages: Gentoo builds from
+# source anyway, so a user who drills only PostgreSQL simply does not
+# build the other three.
+
+EAPI=8
+
+inherit go-module
+
+DESCRIPTION="Continuous restore verification for database backups"
+HOMEPAGE="https://probavi.dev"
+SRC_URI="https://github.com/probavi/probavi/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz"
+
+LICENSE="Apache-2.0"
+SLOT="0"
+KEYWORDS="~amd64 ~arm64"
+IUSE="+postgres mysql mongodb mssql"
+
+# Nothing is a hard runtime dependency: `probavi evidence verify` reads a
+# log and a public key and needs no runtime at all. A sandbox runtime
+# belongs to whichever provider the drill config names.
+RDEPEND=""
+BDEPEND=">=dev-lang/go-1.24"
+
+src_compile() {
+	local ldflags="-s -w -buildid= -X main.version=${PV}"
+	ego build -trimpath -ldflags "${ldflags}" -o probavi ./cmd/probavi
+
+	# No -X main.version for adapters: each reports its own adapterVersion,
+	# which lands in every signed evidence record as adapter.version, and a
+	# second disagreeing number would leave an auditor guessing.
+	local id
+	for id in postgres mysql mongodb mssql; do
+		use "${id}" || continue
+		ego build -trimpath -ldflags '-s -w -buildid=' \
+			-o "probavi-adapter-${id}" "./adapters/${id}"
+	done
+}
+
+src_install() {
+	# /usr/bin, never a libexec directory: the core resolves adapters with
+	# exec.LookPath, so anything off PATH breaks every drill.
+	dobin probavi
+
+	local id
+	for id in postgres mysql mongodb mssql; do
+		use "${id}" || continue
+		dobin "probavi-adapter-${id}"
+		dodoc "adapters/${id}/README.md"
+	done
+
+	dodoc README.md CHANGELOG.md
+}
+
+pkg_postinst() {
+	elog "probavi resolves engine adapters as probavi-adapter-<engine> on PATH."
+	elog "Enable a USE flag for each engine you drill; verifying an existing"
+	elog "evidence log needs neither an adapter nor a sandbox runtime."
+}

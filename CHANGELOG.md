@@ -115,6 +115,49 @@ always called out explicitly.
 
 ### Added
 
+- **Distribution packages for every release**: `.deb`, `.rpm` and `.apk`
+  for amd64 and arm64, plus a `PKGBUILD` and a Gentoo ebuild that build
+  from source. `docs/packaging.md` is normative for what they contain.
+
+  One package per binary, matching the release archives: `probavi` plus
+  `probavi-adapter-<engine>`. **`probavi` declares no hard dependency at
+  all** — `probavi evidence verify` reads a log and a public key and needs
+  no runtime, so an auditor who installs it to check a log must not have a
+  container engine pulled onto their machine. A sandbox runtime belongs to
+  whichever *provider* the drill config names; `apt` installs `Recommends`
+  by default, so a container engine sits in `Suggests` or it is a hard
+  dependency wearing a different hat.
+
+  Adapter packages depend on `probavi`, unversioned, and on nothing else —
+  in particular **no engine client**, because the engine's own tools run
+  inside the sandbox image, not on the drill host.
+
+  **No Probavi apt or yum repository, and no packaging GPG key.** Hosting
+  one means a second long-lived signing key to guard, in a project whose
+  trust proposition is how it handles the first — the key that signs
+  evidence. Instead every artifact carries a **sigstore build-provenance
+  attestation**, which proves the file came from this repository's release
+  workflow and needs no key from anyone (`gh attestation verify`). Signing
+  the `.deb` files would be close to theatre anyway: `dpkg` does not check
+  package signatures by default.
+
+  **A new CI job builds the packages and installs them** on Debian,
+  Fedora and Alpine, then asks each install to resolve an adapter for
+  real. It exists because building a package proves nothing about whether
+  it works — and it caught precisely that: `nfpm` expands environment
+  variables in scalar fields but **not** in a content path, so the first
+  version produced packages that installed cleanly with the adapter at a
+  literal `/usr/bin/probavi-adapter-${ADAPTER}`, where the core’s `PATH`
+  lookup would never find it. The recipes are now rendered with
+  `envsubst` before nfpm sees them, which removes the distinction.
+
+  Four gates in `internal/docs` hold the recipes to the decisions behind
+  them: binaries on `PATH` and never in `/usr/libexec` (the FHS instinct
+  that would break every drill), no engine client and no version pin in
+  the adapter dependency, no hard dependency on the core package, and the
+  hand-written Arch and Gentoo recipes covering every adapter the
+  generated manifest declares. All were checked to fail when violated.
+
 - **A container image**, `ghcr.io/probavi/probavi`, built for
   `linux/amd64` and `linux/arm64` on every release, plus
   `docs/docker.md` — normative for what the image is and what running it

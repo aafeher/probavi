@@ -1,0 +1,216 @@
+# Installing Probavi from a package
+
+Status: **Normative for the published packages**, 2026-08-05. Every
+release attaches `.deb`, `.rpm` and `.apk` files for `amd64` and `arm64`,
+plus a `PKGBUILD` and an ebuild for the two distributions that build from
+source.
+
+---
+
+## 1. There is no Probavi package repository
+
+Packages are attached to the [GitHub
+release](https://github.com/probavi/probavi/releases); you install the
+file. `apt install probavi` will not work, and neither will automatic
+updates.
+
+That is a deliberate trade. Hosting a signed apt or yum repository means
+a **second long-lived signing key** to guard, in a project whose entire
+trust proposition is how it handles the *first* one — the key that signs
+evidence records. A leaked repository key would let an attacker ship a
+`probavi` that writes whatever records they like.
+
+What you get instead:
+
+- **`SHA256SUMS`** covering every artifact of a release.
+- **A sigstore build-provenance attestation** on every archive and
+  package, which proves the file was built by this repository's release
+  workflow from a specific commit, and needs no key from anyone:
+
+  ```console
+  $ gh attestation verify probavi_0.2.0_amd64.deb --repo probavi/probavi
+  ```
+
+Signing the `.deb` files themselves would be close to theatre: `dpkg` does
+not verify package signatures by default (`debsig-verify` ships disabled
+on Debian and Ubuntu), so most users would gain nothing for that second
+key.
+
+## 2. One package per binary
+
+`probavi` is the orchestrator. It resolves an engine adapter as
+`probavi-adapter-<engine>` **on `PATH`** and launches it as a child
+process, so the core alone cannot run a drill:
+
+| Package | Install it when |
+|---|---|
+| `probavi` | always |
+| `probavi-adapter-postgres` | you drill PostgreSQL |
+| `probavi-adapter-mysql` | you drill MySQL or MariaDB |
+| `probavi-adapter-mongodb` | you drill MongoDB |
+| `probavi-adapter-mssql` | you drill SQL Server |
+
+**Verifying an evidence log needs only `probavi`.** `probavi evidence
+verify` reads a log and a public key; an auditor installs one package and
+nothing else — no adapter, no container runtime.
+
+## 3. Dependencies, and why there are almost none
+
+`probavi` declares **no hard dependency**. Nothing is pulled in that a
+verification-only install would not want.
+
+| | `.deb` | `.rpm` | `.apk` |
+|---|---|---|---|
+| Required | — | — | `ca-certificates` |
+| Installed by default | `Recommends: ca-certificates` | `Recommends: ca-certificates` | — |
+| Offered, not installed | `Suggests: docker.io \| podman-docker, openssh-client, kubernetes-client` | `Suggests: docker, openssh-clients, kubernetes-client` | — |
+
+A sandbox runtime belongs to whichever **provider** your drill config
+names, not to the binary. `apt` installs `Recommends` by default, which
+is why a container engine sits in `Suggests` — otherwise it would be a
+hard dependency wearing a different hat. Docker CE is not in the Debian
+archive at all, so the alternatives listed are the ones the archive can
+actually satisfy.
+
+`apk` has no weak dependencies, so `ca-certificates` is required there.
+Alpine's base is the most likely to lack it, and that is exactly where an
+HTTPS webhook notification would fail silently **while the drill itself
+succeeded**.
+
+`probavi-adapter-<engine>` depends on `probavi`, **unversioned**: the
+compatibility contract between core and adapter is the adapter protocol
+version negotiated at handshake, not either package version. It depends
+on nothing else — in particular **no engine client**, because the engine's
+own tools run inside the sandbox image, not on the drill host.
+
+## 4. Install
+
+### Debian, Ubuntu, Mint, Raspbian, Devuan
+
+```console
+$ ver=0.2.0 arch=amd64
+$ base="https://github.com/probavi/probavi/releases/download/v${ver}"
+$ curl -fsSLO "${base}/probavi_${ver}_${arch}.deb"
+$ curl -fsSLO "${base}/probavi-adapter-postgres_${ver}_${arch}.deb"
+$ curl -fsSLO "${base}/SHA256SUMS"
+$ sha256sum -c SHA256SUMS --ignore-missing
+$ sudo apt install ./probavi_${ver}_${arch}.deb ./probavi-adapter-postgres_${ver}_${arch}.deb
+```
+
+Use `apt install ./file.deb`, not `dpkg -i`: apt resolves the
+`Recommends` and the adapter's dependency on the core.
+
+Upgrade by installing the newer file. Remove with
+`sudo apt remove probavi-adapter-postgres probavi`.
+
+### Fedora, RHEL, CentOS, Rocky, Alma, openSUSE
+
+```console
+$ sudo dnf install ./probavi-0.2.0-1.x86_64.rpm ./probavi-adapter-postgres-0.2.0-1.x86_64.rpm
+```
+
+`zypper install` on openSUSE. Remove with `sudo dnf remove probavi-adapter-postgres probavi`.
+
+### Alpine, postmarketOS
+
+```console
+$ sudo apk add --allow-untrusted ./probavi_0.2.0_x86_64.apk ./probavi-adapter-postgres_0.2.0_x86_64.apk
+```
+
+`--allow-untrusted` is required because the package is not signed by an
+Alpine repository key — verify `SHA256SUMS` and the attestation instead
+(§1). Remove with `sudo apk del probavi-adapter-postgres probavi`.
+
+### Arch, Manjaro, EndeavourOS
+
+Each release attaches a `PKGBUILD` that builds from the source tarball
+and produces the split packages:
+
+```console
+$ curl -fsSLO "https://github.com/probavi/probavi/releases/download/v0.2.0/PKGBUILD"
+$ makepkg -si
+```
+
+### Gentoo
+
+Each release attaches `probavi-<version>.ebuild`. Adapters are USE flags
+(`postgres`, `mysql`, `mongodb`, `mssql`) rather than separate packages,
+since the tree builds from source anyway. Drop it into a local overlay:
+
+```console
+$ mkdir -p /var/db/repos/local/app-backup/probavi
+$ cp probavi-0.2.0.ebuild /var/db/repos/local/app-backup/probavi/
+$ ebuild /var/db/repos/local/app-backup/probavi/probavi-0.2.0.ebuild manifest
+$ USE="postgres" emerge app-backup/probavi
+```
+
+Publishing these two to the AUR and to a Gentoo overlay is a manual step
+for now: the AUR wants an SSH key that cannot be scoped to a single
+repository, and there is no overlay repository yet. CI renders and
+checksums both files; nothing is hand-edited.
+
+## 5. Where things live
+
+| | |
+|---|---|
+| Binaries | `/usr/bin/probavi`, `/usr/bin/probavi-adapter-<engine>` |
+| Documentation | `/usr/share/doc/probavi/` |
+| Licence | `/usr/share/doc/probavi/LICENSE` (Arch: `/usr/share/licenses/`) |
+
+**Binaries go in `/usr/bin`, never `/usr/libexec`.** An adapter looks like
+a helper program, and FHS instinct says to hide one — but the core finds
+it with `exec.LookPath`, so anything off `PATH` fails every drill with
+`resolve adapter: executable file not found`.
+
+Probavi creates no directories, no system user, and no unit files. It has
+no daemon and no built-in scheduler; the evidence log and the signing key
+live wherever your drill config says.
+
+## 6. A first drill from a packaged install
+
+```console
+$ sudo mkdir -p /etc/probavi /var/lib/probavi
+$ sudo probavi evidence keygen --out /etc/probavi/ed25519.key
+```
+
+`/etc/probavi/drill.yaml`:
+
+```yaml
+target:
+  name: prod-orders-db
+  adapter: postgres
+  source:
+    kind: pgdump
+    path: /backups/orders/latest.dump
+sandbox:
+  provider: docker
+  timeout: 30m
+  params:
+    image: postgres:16
+    env.POSTGRES_HOST_AUTH_METHOD: trust
+checks:
+  - builtin: service_healthy
+  - builtin: row_count
+    table: orders
+    min: 1
+evidence:
+  path: /var/lib/probavi/evidence.jsonl
+  sign_key: /etc/probavi/ed25519.key
+```
+
+```console
+$ probavi run --config /etc/probavi/drill.yaml
+$ probavi evidence verify --log /var/lib/probavi/evidence.jsonl \
+    --key /etc/probavi/ed25519.key.pub
+```
+
+Schedule it from cron or a systemd timer — Probavi ships no scheduler on
+purpose, and its exit codes are the contract: `0` proven restorable, `1`
+recoverability failure, `2` infrastructure error or cancelled, `3` usage
+or setup error, `5` no evidence record could be written. Take a lock:
+two drills writing one evidence log collide on its single-writer lock.
+
+```cron
+17 2 * * *  flock -n /var/lock/probavi-orders.lock \
+              probavi run --config /etc/probavi/drill.yaml
+```

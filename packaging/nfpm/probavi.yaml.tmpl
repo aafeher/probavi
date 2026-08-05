@@ -1,0 +1,76 @@
+# nfpm input for the core package: one template produces .deb, .rpm and
+# .apk. Arch and Gentoo build from source and have their own recipes
+# beside this directory.
+#
+# Rendered with envsubst before nfpm sees it. nfpm expands environment
+# variables in scalar fields but NOT in a content src or dst, which is a
+# silent trap: the package builds and installs, and the binary lands at a
+# literal ${VAR} path where nothing can find it. Rendering the whole file
+# first removes the distinction.
+#
+# Variables: VERSION, ARCH, BIN_DIR.
+
+name: probavi
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: Ákos Fehér <aafeher@gmail.com>
+vendor: Probavi
+homepage: https://probavi.dev
+license: Apache-2.0
+description: |
+  Continuous restore verification for database backups.
+  Probavi restores a real backup into a disposable sandbox on a schedule,
+  validates it, and records the result as a signed, hash-chained evidence
+  record that anyone can verify offline. It takes no backups of its own.
+  .
+  The orchestrator alone cannot run a drill: it resolves an engine adapter
+  as probavi-adapter-<engine> on PATH. Install the adapter for each engine
+  you drill. Verifying an existing evidence log needs nothing else.
+
+contents:
+  # /usr/bin, never /usr/libexec: the core resolves adapters with
+  # exec.LookPath, so a helper directory outside PATH would break every
+  # drill with "resolve adapter: executable file not found".
+  - src: ${BIN_DIR}/probavi
+    dst: /usr/bin/probavi
+  - src: LICENSE
+    dst: /usr/share/doc/probavi/LICENSE
+  - src: README.md
+    dst: /usr/share/doc/probavi/README.md
+  - src: CHANGELOG.md
+    dst: /usr/share/doc/probavi/CHANGELOG.md
+
+# Nothing is a hard dependency. `probavi evidence verify` reads a log and
+# a public key and needs no runtime at all — an auditor who installs this
+# package to check a log must not have a container engine pulled onto
+# their machine. A sandbox runtime is needed by a *provider*, chosen in
+# the drill config, not by the binary.
+overrides:
+  deb:
+    # apt installs Recommends by default, so a container engine belongs in
+    # Suggests or it becomes a hard dependency by another name. Docker CE
+    # is not in the Debian archive either; the alternatives here are what
+    # the archive can actually satisfy.
+    recommends:
+      - ca-certificates
+    suggests:
+      - docker.io | podman-docker
+      - openssh-client
+      - kubernetes-client
+  rpm:
+    recommends:
+      - ca-certificates
+    suggests:
+      - docker
+      - openssh-clients
+      - kubernetes-client
+  apk:
+    # apk has no weak dependencies. ca-certificates becomes a hard one
+    # here on purpose: Alpine's base is the most likely to lack it, which
+    # is exactly where an HTTPS notification would fail silently while the
+    # drill itself succeeded.
+    depends:
+      - ca-certificates

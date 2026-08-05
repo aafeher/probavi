@@ -13,6 +13,13 @@ on:
 permissions:
   contents: write
   packages: write
+  # Sigstore build provenance: keyless, OIDC, nothing long-lived to guard.
+  # It is why there is no packaging GPG key — signing .deb files would be
+  # security theatre for most users (dpkg does not verify them by default)
+  # in exchange for a second key to protect forever, in a project whose
+  # trust proposition is key handling.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -86,8 +93,61 @@ jobs:
             done
           done
 
-          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS)
+      - name: build Linux packages
+        # .deb, .rpm and .apk for both architectures, from the same
+        # binaries the archives carry. Arch and Gentoo build from source
+        # and get rendered recipes instead (below).
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # See ci.yml: pinned to the newest nfpm the go.mod toolchain builds.
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
+          for goarch in amd64 arm64; do
+            rm -rf dist/pkgroot && mkdir -p dist/pkgroot
+            CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" \
+              go build -trimpath -ldflags "-s -w -buildid= -X main.version=${VERSION}" \
+              -o dist/pkgroot/probavi ./cmd/probavi
+            for dir in adapters/*/; do
+              id="${dir#adapters/}"; id="${id%/}"
+              CGO_ENABLED=0 GOOS=linux GOARCH="${goarch}" \
+                go build -trimpath -ldflags "-s -w -buildid=" \
+                -o "dist/pkgroot/probavi-adapter-${id}" "./${dir%/}"
+            done
+            VERSION="${VERSION}" ARCH="${goarch}" packaging/build-packages.sh dist/pkgroot dist
+          done
+          rm -rf dist/pkgroot
+
+      - name: render the source-built recipes
+        # Arch and Gentoo compile from the GitHub source tarball, so both
+        # recipes need that tarball's checksum. They are attached to the
+        # release rather than pushed: the AUR wants an unscopeable SSH key,
+        # and the overlay has no repository yet (docs/packaging.md).
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          curl -fsSLo source.tar.gz \
+            "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          export PKGVER="${VERSION}"
+          export SOURCE_SHA256="$(sha256sum source.tar.gz | cut -d' ' -f1)"
+          envsubst < packaging/aur/PKGBUILD.tmpl > dist/PKGBUILD
+          envsubst < packaging/gentoo/app-backup/probavi/probavi-9999.ebuild.tmpl \
+            > "dist/probavi-${VERSION}.ebuild"
+          rm -f source.tar.gz
+
+      - name: checksum every artifact
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum -- *.tar.gz *.deb *.rpm *.apk PKGBUILD ./*.ebuild > SHA256SUMS)
           cat dist/SHA256SUMS
+
+      - name: attest build provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+            dist/*.apk
 
       - name: draft the release
         env:
@@ -119,6 +179,28 @@ jobs:
             echo "sha256sum -c SHA256SUMS --ignore-missing"
             echo '```'
             echo
+            echo "Every archive and package also carries a sigstore build-provenance"
+            echo "attestation, which needs no key from anyone:"
+            echo
+            echo '```sh'
+            echo "gh attestation verify probavi_${VERSION}_linux_amd64.tar.gz --repo ${GITHUB_REPOSITORY}"
+            echo '```'
+            echo
+            echo "## Linux packages"
+            echo
+            echo "\\`.deb\\`, \\`.rpm\\` and \\`.apk\\` for amd64 and arm64, one per binary."
+            echo "There is no Probavi apt or yum repository on purpose: hosting one means"
+            echo "a second long-lived signing key to guard, in a project whose trust"
+            echo "proposition is key handling. Install the file directly, e.g."
+            echo
+            echo '```sh'
+            echo "sudo apt install ./probavi_${VERSION}_amd64.deb ./probavi-adapter-postgres_${VERSION}_amd64.deb"
+            echo '```'
+            echo
+            echo "\\`PKGBUILD\\` (Arch) and \\`probavi-${VERSION}.ebuild\\` (Gentoo) build from"
+            echo "source and are attached here too. See"
+            echo "[docs/packaging.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/docs/packaging.md)."
+            echo
             echo "## Reproduce the binaries"
             echo
             echo "Built with \`$(go version | cut -d' ' -f3)\` (pinned by go.mod). To reproduce a binary bit for bit:"
@@ -140,7 +222,9 @@ jobs:
             echo
             echo "Each result matches the binary inside the corresponding archive."
           } > notes.md
-          gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/SHA256SUMS \
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.apk \
+            dist/PKGBUILD dist/*.ebuild dist/SHA256SUMS \
             --draft --verify-tag --title "probavi ${GITHUB_REF_NAME}" --notes-file notes.md
 
   image:
