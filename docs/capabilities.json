@@ -14,10 +14,11 @@
       "schema": "docs/schemas/adapter/"
     },
     "evidence_schema": {
-      "version": "probavi-evidence/1",
+      "version": "probavi-evidence/2",
       "readable_versions": [
         "probavi-evidence/0",
-        "probavi-evidence/1"
+        "probavi-evidence/1",
+        "probavi-evidence/2"
       ],
       "spec": "docs/evidence-schema.md",
       "schema": "docs/schemas/evidence/record.json",

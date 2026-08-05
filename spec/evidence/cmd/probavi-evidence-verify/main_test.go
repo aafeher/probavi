@@ -66,7 +66,7 @@ func TestValidLogExitsZero(t *testing.T) {
 
 func TestEveryPublishedVersionVerifies(t *testing.T) {
 	key := examplePath("signer.pub")
-	for _, name := range []string{"log_v0.jsonl", "log_v1.jsonl"} {
+	for _, name := range []string{"log_v0.jsonl", "log_v1.jsonl", "log_v2.jsonl"} {
 		if code, _, stderr := runCLI(t, "--log", examplePath(name), "--key", key); code != exitValid {
 			t.Errorf("%s: exit = %d, want 0 (stderr: %s)", name, code, stderr)
 		}

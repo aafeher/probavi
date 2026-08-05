@@ -33,6 +33,10 @@ const teardownGrace = 60 * time.Second
 
 // AdapterClient is what the core needs from the adapter protocol client.
 type AdapterClient interface {
+	// Path is the adapter executable this client launches. The core hashes
+	// it into adapter.digest so a record says which build produced it
+	// (evidence-schema.md §3).
+	Path() string
 	Probe(ctx context.Context) (*adapter.ProbeResult, error)
 	Provision(ctx context.Context, req *adapter.ProvisionRequest, verbs adapter.SandboxVerbs) (*adapter.ProvisionResult, error)
 	Healthcheck(ctx context.Context, conn *adapter.Connection, state json.RawMessage, verbs adapter.SandboxVerbs) (*adapter.HealthcheckResult, error)
@@ -73,6 +77,10 @@ type Drill struct {
 
 	Now      func() time.Time
 	Hostname func() (string, error)
+	// Executable resolves this process's own binary so its digest can be
+	// recorded (evidence-schema.md §3). Injected for the same reason
+	// Hostname is: a test must not depend on the machine it runs on.
+	Executable func() (string, error)
 }
 
 // Run executes the drill and appends exactly one signed evidence record.
@@ -132,8 +140,12 @@ func (d *Drill) appendDegraded(rejected *evidence.Record, cause error) (*evidenc
 			ConfigHash: cfg.Hash,
 			PITRTarget: rejected.Drill.PITRTarget,
 		},
-		Backup:  evidence.Backup{Kind: safeText(cfg.Target.Source.Kind, "unknown")},
-		Adapter: evidence.Adapter{Name: safeText(cfg.Target.Adapter, "unknown"), Protocol: adapter.ProtocolVersion},
+		Backup: evidence.Backup{Kind: safeText(cfg.Target.Source.Kind, "unknown")},
+		Adapter: evidence.Adapter{
+			Name:     safeText(cfg.Target.Adapter, "unknown"),
+			Protocol: adapter.ProtocolVersion,
+			Digest:   rejected.Adapter.Digest,
+		},
 		// Sandbox params are operator data copied verbatim and are the most
 		// likely reason a record is unrepresentable; a degraded record drops
 		// them rather than risking a second rejection for the same cause.
@@ -155,6 +167,7 @@ func (d *Drill) appendDegraded(rejected *evidence.Record, cause error) (*evidenc
 			OS:             runtime.GOOS,
 			Arch:           runtime.GOARCH,
 			HostID:         d.hostID(),
+			ProbaviDigest:  rejected.Env.ProbaviDigest,
 		},
 	}
 	if err := d.Store.Append(degraded); err != nil {
@@ -176,6 +189,9 @@ func (d *Drill) defaults() {
 	if d.Hostname == nil {
 		d.Hostname = os.Hostname
 	}
+	if d.Executable == nil {
+		d.Executable = os.Executable
+	}
 }
 
 // baseRecord pre-fills everything knowable before the drill starts, so any
@@ -195,10 +211,14 @@ func (d *Drill) baseRecord() *evidence.Record {
 		pitrTarget = &resolved
 	}
 	return &evidence.Record{
-		Schema:  evidence.SchemaID,
-		Drill:   evidence.Drill{Name: cfg.Target.Name, ConfigHash: cfg.Hash, PITRTarget: pitrTarget},
-		Backup:  evidence.Backup{Kind: cfg.Target.Source.Kind},
-		Adapter: evidence.Adapter{Name: cfg.Target.Adapter, Protocol: adapter.ProtocolVersion},
+		Schema: evidence.SchemaID,
+		Drill:  evidence.Drill{Name: cfg.Target.Name, ConfigHash: cfg.Hash, PITRTarget: pitrTarget},
+		Backup: evidence.Backup{Kind: cfg.Target.Source.Kind},
+		Adapter: evidence.Adapter{
+			Name:     cfg.Target.Adapter,
+			Protocol: adapter.ProtocolVersion,
+			Digest:   evidence.FileDigest(d.Adapter.Path()),
+		},
 		Sandbox: evidence.Sandbox{Provider: cfg.Sandbox.Provider, Params: params},
 		Checks:  []evidence.Check{},
 		Env: evidence.Env{
@@ -206,6 +226,7 @@ func (d *Drill) baseRecord() *evidence.Record {
 			OS:             runtime.GOOS,
 			Arch:           runtime.GOARCH,
 			HostID:         d.hostID(),
+			ProbaviDigest:  d.selfDigest(),
 		},
 	}
 }
@@ -479,6 +500,18 @@ func supportsPITR(probe *adapter.ProbeResult, kind string) bool {
 		}
 	}
 	return false
+}
+
+// selfDigest is the sha256 reference of the probavi binary that is writing
+// the record. A path this process cannot resolve or read yields null, the
+// same as any other unreadable executable: §3 makes the field nullable so
+// that build identity never costs a drill its signed record.
+func (d *Drill) selfDigest() *string {
+	path, err := d.Executable()
+	if err != nil {
+		return nil
+	}
+	return evidence.FileDigest(path)
 }
 
 func (d *Drill) hostID() string {

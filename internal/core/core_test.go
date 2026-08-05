@@ -34,7 +34,15 @@ type fakeAdapter struct {
 	provReq         *adapter.ProvisionRequest
 	teardownReasons []string
 	teardownStates  []string
+
+	// path is the executable the core would hash into adapter.digest.
+	// Empty by default, so a record carries a null digest unless a test
+	// says otherwise — the shape a drill produces when the file cannot be
+	// read (evidence-schema.md §3).
+	path string
 }
+
+func (f *fakeAdapter) Path() string { return f.path }
 
 func (f *fakeAdapter) Probe(context.Context) (*adapter.ProbeResult, error) {
 	return f.probe, f.probeErr

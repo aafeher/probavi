@@ -123,6 +123,7 @@ func TestEvidenceGoldenLogsValidate(t *testing.T) {
 	for _, golden := range []string{
 		"../../docs/schemas/evidence/examples/log_v0.jsonl",
 		"../../docs/schemas/evidence/examples/log_v1.jsonl",
+		"../../docs/schemas/evidence/examples/log_v2.jsonl",
 	} {
 		for i, line := range goldenLines(t, golden) {
 			if err := record.Validate(parseJSON(t, line)); err != nil {

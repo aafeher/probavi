@@ -57,7 +57,7 @@ func verifyBytes(t *testing.T, log []byte, kr Keyring) Result {
 // is in.
 func TestPublishedExamplesVerify(t *testing.T) {
 	kr := NewKeyring(exampleKey(t))
-	for _, name := range []string{"log_v0.jsonl", "log_v1.jsonl"} {
+	for _, name := range []string{"log_v0.jsonl", "log_v1.jsonl", "log_v2.jsonl"} {
 		t.Run(name, func(t *testing.T) {
 			res := verifyBytes(t, exampleLog(t, name), kr)
 			if res.Status != StatusValid {
@@ -79,7 +79,7 @@ func TestPublishedExamplesVerify(t *testing.T) {
 // named, which would silently break keyring lookup after a rotation.
 func TestCommittedKeyIDMatchesRecords(t *testing.T) {
 	want := KeyID(exampleKey(t))
-	for _, name := range []string{"log_v0.jsonl", "log_v1.jsonl"} {
+	for _, name := range []string{"log_v0.jsonl", "log_v1.jsonl", "log_v2.jsonl"} {
 		for i, line := range splitLines(t, exampleLog(t, name)) {
 			var rec struct {
 				Sig struct {

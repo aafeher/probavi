@@ -28,7 +28,10 @@ func sampleRecordPass() *Record {
 			SizeBytes: i64Ptr(565248),
 			CreatedAt: strPtr("2026-07-30T01:58:02.000Z"),
 		},
-		Adapter: Adapter{Name: "postgres", Version: strPtr("0.1.0"), Protocol: "probavi-adapter/0"},
+		Adapter: Adapter{
+			Name: "postgres", Version: strPtr("0.1.0"), Protocol: "probavi-adapter/0",
+			Digest: strPtr(hexRef("4c")),
+		},
 		Sandbox: Sandbox{Provider: "docker", Params: map[string]string{"image": "postgres:16", "memory": "2GiB"}},
 		Timings: Timings{
 			Provision: i64Ptr(1170), EngineReady: i64Ptr(1166), Transfer: i64Ptr(110),
@@ -40,7 +43,10 @@ func sampleRecordPass() *Record {
 		},
 		Outcome: OutcomePass,
 		Error:   nil,
-		Env:     Env{ProbaviVersion: "0.1.0", OS: "linux", Arch: "amd64", HostID: "3f7a9c2e5b1d8e04"},
+		Env: Env{
+			ProbaviVersion: "0.1.0", OS: "linux", Arch: "amd64", HostID: "3f7a9c2e5b1d8e04",
+			ProbaviDigest: strPtr(hexRef("1d")),
+		},
 	}
 }
 
@@ -67,7 +73,10 @@ func sampleRecordError() *Record {
 		Checks:  []Check{},
 		Outcome: OutcomeError,
 		Error:   &DrillError{Code: "sandbox_error", Message: "sandbox runtime died during provisioning"},
-		Env:     Env{ProbaviVersion: "0.1.0", OS: "linux", Arch: "amd64", HostID: "3f7a9c2e5b1d8e04"},
+		Env: Env{
+			ProbaviVersion: "0.1.0", OS: "linux", Arch: "amd64", HostID: "3f7a9c2e5b1d8e04",
+			ProbaviDigest: strPtr(hexRef("1d")),
+		},
 	}
 }
 
