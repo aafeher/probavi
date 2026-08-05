@@ -1,0 +1,57 @@
+# Rendered by packaging/homebrew/render.sh from a release's SHA256SUMS.
+#
+# A binary formula: it installs the same reproducible artifacts the
+# release publishes, so a `brew install` and a downloaded tarball are the
+# same bytes. Homebrew downloads without setting the quarantine
+# attribute, so Gatekeeper does not block them — which is why there is no
+# signed .pkg and no Apple Developer ID to pay for and guard.
+
+class Probavi < Formula
+  desc "Continuous restore verification for database backups"
+  homepage "https://probavi.dev"
+  version "${VERSION}"
+  license "Apache-2.0"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/probavi/probavi/releases/download/v#{version}/probavi_#{version}_darwin_arm64.tar.gz"
+      sha256 "${SHA_ARM64}"
+    end
+    on_intel do
+      url "https://github.com/probavi/probavi/releases/download/v#{version}/probavi_#{version}_darwin_amd64.tar.gz"
+      sha256 "${SHA_AMD64}"
+    end
+  end
+
+  def install
+    bin.install "probavi"
+    doc.install "README.md", "CHANGELOG.md"
+  end
+
+  def caveats
+    <<~EOS
+      probavi cannot run a drill on its own: it resolves an engine adapter
+      as probavi-adapter-<engine> on PATH. Install one per engine, e.g.
+
+        brew install probavi/tap/probavi-adapter-postgres
+
+      Verifying an existing evidence log needs neither an adapter nor a
+      sandbox runtime — `probavi evidence verify` reads a log and a public
+      key and nothing else.
+
+      macOS has no native container runtime. The docker sandbox provider
+      needs Docker Desktop, colima, OrbStack, or a remote DOCKER_HOST.
+    EOS
+  end
+
+  test do
+    assert_match "probavi #{version}", shell_output("#{bin}/probavi version")
+
+    # An empty log is valid and needs no signer, so the verifier is
+    # exercised end to end without inventing key material in a test.
+    system bin/"probavi", "evidence", "keygen", "--out", testpath/"k"
+    (testpath/"empty.jsonl").write("")
+    result = shell_output("#{bin}/probavi evidence verify --log #{testpath}/empty.jsonl --key #{testpath}/k.pub")
+    assert_match "VALID", result
+  end
+end

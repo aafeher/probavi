@@ -115,6 +115,40 @@ always called out explicitly.
 
 ### Added
 
+- **A Homebrew tap for macOS**, `probavi/tap`, with one formula per
+  binary and both architectures selected automatically.
+
+  **No signed `.pkg`, and none is needed.** Homebrew downloads without
+  setting the quarantine attribute, so Gatekeeper does not block the
+  binaries — while a `.pkg` distributed any other way would need a
+  Developer ID certificate, notarisation on every release, and Apple
+  credentials in CI: a paid account and a new long-lived secret, for a
+  CLI tool whose users already have `brew`. `docs/packaging.md` §5 states
+  the other side of that trade too — downloading a release tarball
+  directly *does* get quarantined, and how to clear it.
+
+  Note the split is the opposite of the container image's, deliberately:
+  installing a second formula is one command, while composing a derived
+  Docker image is a Dockerfile plus a build plus a registry. Adapter
+  formulae depend on the core, unversioned, and on nothing else; the core
+  formula depends on nothing at all, so verifying an evidence log stays a
+  one-formula install.
+
+  Formulae are rendered from the release's own `SHA256SUMS`, never from
+  recomputed checksums, so one can only pin what the release actually
+  published — a missing entry stops the render rather than yielding a
+  formula that fails on a user's Mac. CI renders them on every pull
+  request, syntax-checks the Ruby, and proves the missing-checksum guard
+  fires. It earned that on the first run: the initial templates produced
+  Ruby that did not parse.
+
+  Pushing to the tap is automated with a token scoped to that repository
+  alone, and the step skips itself until the repository and token exist —
+  the formulae are attached to each release regardless, which is enough
+  to reproduce the tap by hand. Same rule as the Gentoo overlay, and the
+  opposite of AUR, where the credential is an unscopeable SSH key on a
+  third-party host.
+
 - **Distribution packages for every release**: `.deb`, `.rpm` and `.apk`
   for amd64 and arm64, plus a `PKGBUILD` and a Gentoo ebuild that build
   from source. `docs/packaging.md` is normative for what they contain.

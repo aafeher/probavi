@@ -283,6 +283,29 @@ jobs:
             dnf remove -y -q probavi-adapter-postgres probavi
           SH
 
+      # The formulae are Ruby, generated at release time from checksums
+      # nobody reviews by hand. A syntax error there surfaces on a user's
+      # Mac during `brew install`, long after the release is published.
+      - name: render and syntax-check the Homebrew formulae
+        run: |
+          set -euo pipefail
+          mkdir -p dist/fake
+          for name in probavi $(for d in adapters/*/; do d="${d#adapters/}"; echo "probavi-adapter-${d%/}"; done); do
+            for arch in arm64 amd64; do
+              echo "placeholder" > "dist/fake/${name}_0.0.0_darwin_${arch}.tar.gz"
+            done
+          done
+          (cd dist/fake && sha256sum -- *.tar.gz > SHA256SUMS)
+          VERSION=0.0.0 packaging/homebrew/render.sh dist/fake/SHA256SUMS dist/Formula
+          for f in dist/Formula/*.rb; do ruby -c "$f"; done
+          # A checksum the release did not publish must stop the render,
+          # never yield a formula pinning an empty string.
+          grep -v 'probavi_0.0.0_darwin_arm64' dist/fake/SHA256SUMS > dist/fake/SHORT
+          if VERSION=0.0.0 packaging/homebrew/render.sh dist/fake/SHORT dist/Bad 2>/dev/null; then
+            echo "::error::render.sh accepted a SHA256SUMS with a missing entry"
+            exit 1
+          fi
+
       - name: install and run on Alpine
         run: |
           docker run --rm -v "$PWD/dist/pkgs:/pkgs:ro" alpine:3.22 sh -eus <<'SH'

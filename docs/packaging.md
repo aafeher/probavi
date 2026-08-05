@@ -7,12 +7,13 @@ source.
 
 ---
 
-## 1. There is no Probavi package repository
+## 1. There is no Probavi apt or yum repository
 
-Packages are attached to the [GitHub
+On Linux, packages are attached to the [GitHub
 release](https://github.com/probavi/probavi/releases); you install the
 file. `apt install probavi` will not work, and neither will automatic
-updates.
+updates. (macOS is different — §5 — because a Homebrew tap needs no
+signing key of its own.)
 
 That is a deliberate trade. Hosting a signed apt or yum repository means
 a **second long-lived signing key** to guard, in a project whose entire
@@ -149,7 +150,48 @@ for now: the AUR wants an SSH key that cannot be scoped to a single
 repository, and there is no overlay repository yet. CI renders and
 checksums both files; nothing is hand-edited.
 
-## 5. Where things live
+## 5. macOS
+
+Install from the Probavi tap. Homebrew picks the right architecture:
+
+```console
+$ brew install probavi/tap/probavi probavi/tap/probavi-adapter-postgres
+```
+
+Upgrade with `brew upgrade probavi`, remove with `brew uninstall
+probavi-adapter-postgres probavi`, and drop the tap with `brew untap
+probavi/tap`.
+
+**There is no signed `.pkg`, and none is needed.** Homebrew downloads
+without setting the quarantine attribute, so Gatekeeper does not block
+the binaries. A `.pkg` distributed any other way would need a Developer
+ID certificate, notarisation on every release, and Apple credentials in
+CI — a paid account and a new long-lived secret, for a CLI tool whose
+users already have `brew`.
+
+If you download a release tarball directly instead, macOS *will* attach
+the quarantine attribute and Gatekeeper will refuse to run the binary
+until you clear it:
+
+```console
+$ xattr -d com.apple.quarantine probavi
+```
+
+That is the honest trade-off of the decision, not a defect to work
+around silently.
+
+**macOS has no native container runtime.** The `docker` sandbox provider
+needs Docker Desktop, colima, OrbStack, or a remote `DOCKER_HOST`; the
+`remotehost` provider needs only an SSH target. Install one before the
+first drill rather than discovering it at teardown time. Everything in
+§7 works unchanged once a runtime is available, with the evidence log and
+key wherever your drill config puts them.
+
+The formulae are attached to each release as well, so the tap can be
+reproduced from a release alone — checksums come straight from that
+release's `SHA256SUMS`.
+
+## 6. Where things live
 
 | | |
 |---|---|
@@ -166,7 +208,7 @@ Probavi creates no directories, no system user, and no unit files. It has
 no daemon and no built-in scheduler; the evidence log and the signing key
 live wherever your drill config says.
 
-## 6. A first drill from a packaged install
+## 7. A first drill from a packaged install
 
 ```console
 $ sudo mkdir -p /etc/probavi /var/lib/probavi

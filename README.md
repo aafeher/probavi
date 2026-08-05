@@ -87,6 +87,8 @@ Verifying an evidence log needs nothing else: `probavi evidence verify` reads a 
 
 Distribution packages are attached to every release — `.deb`, `.rpm` and `.apk` for both architectures, plus a `PKGBUILD` and a Gentoo ebuild that build from source. One package per binary, so `sudo apt install ./probavi_0.2.0_amd64.deb ./probavi-adapter-postgres_0.2.0_amd64.deb` is a working install. There is no Probavi apt or yum repository, on purpose: hosting one means a second long-lived signing key to guard, in a project whose trust proposition is how it handles the first one. [docs/packaging.md](docs/packaging.md) has the per-distribution commands, the dependency rationale, and a first drill from a packaged install.
 
+On macOS, install from the Probavi Homebrew tap — `brew install probavi/tap/probavi probavi/tap/probavi-adapter-postgres` — which picks the right architecture and needs no Gatekeeper workaround, because Homebrew downloads without setting the quarantine attribute. Note that macOS has no native container runtime: the docker sandbox provider needs Docker Desktop, colima, OrbStack or a remote `DOCKER_HOST`.
+
 There is also a container image, `ghcr.io/probavi/probavi`, carrying the core and every adapter for `linux/amd64` and `linux/arm64` — read [docs/docker.md](docs/docker.md) before using it. Giving a containerised Probavi a daemon to create sandboxes with means either bind-mounting the host's docker socket, which is root-equivalent access to that host, or pointing `DOCKER_HOST` at a remote one. The plain binary needs neither, which is why it stays the smaller trust decision.
 
 ## Quickstart
