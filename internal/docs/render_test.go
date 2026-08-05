@@ -197,7 +197,22 @@ func TestPublishedImageTagMatchesTheDocumentedPull(t *testing.T) {
 	if doc := read(t, "docs/docker.md"); !strings.Contains(doc, "docker pull ghcr.io/probavi/probavi:") {
 		t.Error("docs/docker.md no longer shows a docker pull command to keep in step")
 	}
+
+	// Same invariant, second place, and the one that was missed when the
+	// tag was fixed: the binary inside the image stamps itself from this
+	// argument, and that stamp is signed into every record as
+	// env.probavi_version. Taking it from the git tag made one release
+	// write two spellings of its own version.
+	if m := imageBuildArg.FindStringSubmatch(read(t, ".github/workflows/release.yml")); m == nil {
+		t.Error(".github/workflows/release.yml no longer passes VERSION to the image build")
+	} else if strings.Contains(m[1], "github.ref_name") {
+		t.Errorf("the image is built with VERSION=%s, which carries the git tag's leading "+
+			"\"v\"; the archives and packages of the same release stamp the bare version", m[1])
+	}
 }
+
+// imageBuildArg matches the version handed to the image build.
+var imageBuildArg = regexp.MustCompile(`(?m)^\s*build-args: VERSION=(.+)$`)
 
 // TestPackageNamesSurviveARelease pins the rename that keeps the
 // documented checksum command honest.
