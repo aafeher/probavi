@@ -115,6 +115,53 @@ always called out explicitly.
 
 ### Added
 
+- **A container image**, `ghcr.io/probavi/probavi`, built for
+  `linux/amd64` and `linux/arm64` on every release, plus
+  `docs/docker.md` — normative for what the image is and what running it
+  costs.
+
+  One image carrying the core and every in-repo adapter, deliberately not
+  the per-binary split the archives and packages use: adapters run as
+  child processes of the core and must share its filesystem, so separate
+  images would only compose through a `COPY --from` Dockerfile the user
+  writes.
+
+  **The document leads with the consequence rather than burying it.** The
+  docker sandbox provider creates *sibling* containers, so a containerised
+  Probavi needs a daemon it can reach — and bind-mounting the host socket
+  to give it one grants root-equivalent access to that host. The
+  alternative, `DOCKER_HOST=ssh://…`, is stated beside it, and the
+  container is explicitly **not** presented as the recommended
+  deployment: the plain binary needs neither a socket nor a credential.
+
+  `kubectl` is absent on purpose. The Kubernetes provider needs a
+  kubeconfig and RBAC to create Jobs — an in-cluster deployment with a
+  service account, not a container holding a socket. Bundling it would
+  suggest the two are one shape.
+
+  Verified by running a real drill from inside the image against the host
+  daemon: sandbox created, `pg_dump` backup restored, both checks passed,
+  a `probavi-evidence/2` record appended with both build digests, sandbox
+  destroyed, zero orphans — and the log then verified both by the image
+  and by the independent verifier. That run is also what confirmed the
+  file-visibility rule now in §4.1: the backup must be readable by the
+  *Probavi container*, not by the daemon's host, because `put_file` is a
+  `docker cp` from the client's own filesystem.
+
+  Three gates in `internal/docs` keep the image honest: the runtime
+  packages each shipped feature needs, the unprivileged user, and both
+  base images pinned by digest. All three were checked to fail when
+  violated.
+
+  One claim was corrected before it shipped. The first draft said HTTPS
+  notifications fail without the `ca-certificates` package; measuring it
+  showed the Alpine base already carries `ca-certificates-bundle`, so
+  public HTTPS works without it. The package stays for the two reasons
+  that survive measurement — the dependency is stated rather than
+  inherited from a base image that may change, and `update-ca-certificates`
+  is how an operator trusts a private CA (§9) — and the Dockerfile, the
+  document and the gate all say that instead.
+
 - **The core writes evidence schema v2**: every record now carries
   `adapter.digest` — the adapter executable that performed the restore —
   and `env.probavi_digest` — the `probavi` binary that signed the result.
