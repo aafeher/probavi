@@ -140,6 +140,16 @@ jobs:
           (cd dist && sha256sum -- *.tar.gz *.deb *.rpm *.apk PKGBUILD ./*.ebuild > SHA256SUMS)
           cat dist/SHA256SUMS
 
+      - name: render the Homebrew formulae
+        # Checksums come from the SHA256SUMS just written, never
+        # recomputed: a formula can then only pin what this release
+        # actually published. A wrong sha256 fails at `brew install`, on
+        # the user's machine.
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}" packaging/homebrew/render.sh dist/SHA256SUMS dist/Formula
+          ls -1 dist/Formula
+
       - name: attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
@@ -201,6 +211,17 @@ jobs:
             echo "source and are attached here too. See"
             echo "[docs/packaging.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/docs/packaging.md)."
             echo
+            echo "## macOS"
+            echo
+            echo '```sh'
+            echo "brew install probavi/tap/probavi probavi/tap/probavi-adapter-postgres"
+            echo '```'
+            echo
+            echo "The formulae are attached here as well, so the tap can be reproduced"
+            echo "from this release alone. Homebrew downloads without setting the"
+            echo "quarantine attribute, so Gatekeeper does not block the binaries —"
+            echo "which is why there is no signed .pkg."
+            echo
             echo "## Reproduce the binaries"
             echo
             echo "Built with \`$(go version | cut -d' ' -f3)\` (pinned by go.mod). To reproduce a binary bit for bit:"
@@ -224,8 +245,47 @@ jobs:
           } > notes.md
           gh release create "${GITHUB_REF_NAME}" \
             dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.apk \
-            dist/PKGBUILD dist/*.ebuild dist/SHA256SUMS \
+            dist/PKGBUILD dist/*.ebuild dist/Formula/*.rb dist/SHA256SUMS \
             --draft --verify-tag --title "probavi ${GITHUB_REF_NAME}" --notes-file notes.md
+
+  tap:
+    name: Update the Homebrew tap
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The formulae pin a sha256 that must match SHA256SUMS exactly, so a
+      # manual copy is the kind of step that goes stale and silently
+      # breaks `brew install`. It is automated with a fine-grained token
+      # scoped to the tap repository alone — the same rule that keeps AUR
+      # manual, where the credential is an unscopeable SSH key on a
+      # third-party host.
+      #
+      # Until that repository and token exist, this step skips itself and
+      # the formulae remain attached to the release, which is enough to
+      # reproduce the tap by hand (docs/packaging.md).
+      - name: push the rendered formulae
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        if: ${{ env.TAP_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p formulae
+          gh release download "${GITHUB_REF_NAME}" --pattern '*.rb' --dir formulae
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/probavi/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp formulae/*.rb tap/Formula/
+          cd tap
+          git config user.name "Ákos Fehér"
+          git config user.email "aafeher@gmail.com"
+          git add Formula
+          git commit -m "probavi ${VERSION}" || { echo "tap already current"; exit 0; }
+          git push
 
   image:
     name: Publish container image

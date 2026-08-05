@@ -13,6 +13,8 @@ var packagingRecipes = []string{
 	"packaging/nfpm/adapter.yaml.tmpl",
 	"packaging/aur/PKGBUILD.tmpl",
 	"packaging/gentoo/app-backup/probavi/probavi-9999.ebuild.tmpl",
+	"packaging/homebrew/probavi.rb.tmpl",
+	"packaging/homebrew/adapter.rb.tmpl",
 }
 
 // libexecish matches the directories a packager's FHS instinct reaches
@@ -45,7 +47,12 @@ func TestPackagesInstallOntoPATH(t *testing.T) {
 			if m := libexecish.FindString(body); m != "" {
 				t.Errorf("%s installs into %s — the core finds adapters on PATH only", recipe, m)
 			}
-			if !strings.Contains(body, "/usr/bin") && !strings.Contains(body, "dobin") {
+			// Homebrew has its own idiom: bin.install puts the binary in
+			// the formula's bin, which brew links onto PATH.
+			onPath := strings.Contains(body, "/usr/bin") ||
+				strings.Contains(body, "dobin") ||
+				strings.Contains(body, "bin.install")
+			if !onPath {
 				t.Errorf("%s names no PATH install location", recipe)
 			}
 		})
@@ -129,5 +136,45 @@ func TestPackagingDocIsReachable(t *testing.T) {
 		if body := read(t, want); len(body) == 0 {
 			t.Errorf("%s is empty", want)
 		}
+	}
+}
+
+// TestHomebrewFormulaeDependOnTheCoreOnly is the tap's half of
+// TestAdapterPackagesDependOnTheCoreOnly: an adapter formula must require
+// the core and nothing else, and must not pin its version — the contract
+// is the adapter protocol version negotiated at handshake.
+func TestHomebrewFormulaeDependOnTheCoreOnly(t *testing.T) {
+	adapter := directives(t, "packaging/homebrew/adapter.rb.tmpl")
+	if !strings.Contains(adapter, `depends_on "probavi/tap/probavi"`) {
+		t.Error("the adapter formula does not depend on the core formula")
+	}
+	if regexp.MustCompile(`depends_on "probavi/tap/probavi"\s*,`).MatchString(adapter) {
+		t.Error("the adapter formula constrains the core's version — the contract is the " +
+			"adapter protocol version negotiated at handshake, not either formula version")
+	}
+	// The core must stay installable alone: an auditor verifying a log
+	// needs no adapter and no sandbox runtime.
+	if core := directives(t, "packaging/homebrew/probavi.rb.tmpl"); strings.Contains(core, "depends_on") {
+		t.Error("the core formula declares a dependency — verifying an evidence log must " +
+			"require nothing")
+	}
+}
+
+// TestHomebrewFormulaeCoverBothArchitectures keeps the tap usable on both
+// Macs Apple sells and sold. A formula missing a branch installs nothing
+// on that architecture, and says so only at install time.
+func TestHomebrewFormulaeCoverBothArchitectures(t *testing.T) {
+	for _, tmpl := range []string{
+		"packaging/homebrew/probavi.rb.tmpl",
+		"packaging/homebrew/adapter.rb.tmpl",
+	} {
+		t.Run(tmpl, func(t *testing.T) {
+			body := directives(t, tmpl)
+			for _, want := range []string{"on_arm", "on_intel", "darwin_arm64", "darwin_amd64"} {
+				if !strings.Contains(body, want) {
+					t.Errorf("%s has no %s branch", tmpl, want)
+				}
+			}
+		})
 	}
 }

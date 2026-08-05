@@ -1,0 +1,38 @@
+# Rendered by packaging/homebrew/render.sh, once per adapter.
+
+class ${CLASS} < Formula
+  desc "Probavi engine adapter for ${ENGINE}"
+  homepage "https://probavi.dev"
+  version "${VERSION}"
+  license "Apache-2.0"
+
+  # Unversioned on purpose: the compatibility contract between core and
+  # adapter is the adapter protocol version, negotiated at handshake, not
+  # either formula's version. That is what keeps per-adapter repositories
+  # possible later (AGENTS.md §6).
+  depends_on "probavi/tap/probavi"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/probavi/probavi/releases/download/v#{version}/probavi-adapter-${ADAPTER}_#{version}_darwin_arm64.tar.gz"
+      sha256 "${SHA_ARM64}"
+    end
+    on_intel do
+      url "https://github.com/probavi/probavi/releases/download/v#{version}/probavi-adapter-${ADAPTER}_#{version}_darwin_amd64.tar.gz"
+      sha256 "${SHA_AMD64}"
+    end
+  end
+
+  def install
+    bin.install "probavi-adapter-${ADAPTER}"
+    doc.install "README.md"
+  end
+
+  test do
+    # The real contract: the core must find this adapter by name on PATH
+    # and complete a protocol handshake with it. Asserting the binary
+    # merely exists would pass for one installed where nothing reaches it.
+    core = Formula["probavi/tap/probavi"].opt_bin/"probavi"
+    assert_match "\"name\":\"${ADAPTER}\"", shell_output("#{core} adapter probe ${ADAPTER}")
+  end
+end
