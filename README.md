@@ -85,6 +85,8 @@ Adapters ship for `postgres`, `mysql`, `mongodb`, and `mssql`. Both binaries mus
 
 Verifying an evidence log needs nothing else: `probavi evidence verify` reads a log and a public key, so an auditor installs the core alone.
 
+There is also a container image, `ghcr.io/probavi/probavi`, carrying the core and every adapter for `linux/amd64` and `linux/arm64` — read [docs/docker.md](docs/docker.md) before using it. Giving a containerised Probavi a daemon to create sandboxes with means either bind-mounting the host's docker socket, which is root-equivalent access to that host, or pointing `DOCKER_HOST` at a remote one. The plain binary needs neither, which is why it stays the smaller trust decision.
+
 ## Quickstart
 
 Prove a PostgreSQL backup restorable in about five minutes, building from source — or install the release binaries above and skip the `go build` steps. You need Go 1.24+, Docker, and a `pg_dump` custom-format (`-Fc`) backup file.

@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -141,3 +142,71 @@ jobs:
           } > notes.md
           gh release create "${GITHUB_REF_NAME}" dist/*.tar.gz dist/SHA256SUMS \
             --draft --verify-tag --title "probavi ${GITHUB_REF_NAME}" --notes-file notes.md
+
+  image:
+    name: Publish container image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The draft release must exist before its notes can gain the digest,
+    # and a failed artifact build should not leave an image published
+    # against a release nobody can download.
+    needs: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # QEMU so one amd64 runner can also produce the arm64 layer, and the
+      # container driver because the default builder cannot do multi-arch.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          # GHCR authenticates with the built-in token, so publishing the
+          # image adds no long-lived secret to this repository.
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build and push
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ github.ref_name }}
+          # No :latest. A drill's evidence should name a version somebody
+          # can pull again, and a floating tag makes that impossible.
+          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          provenance: true
+          sbom: true
+
+      - name: record the digest in the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # Append to the notes the release job wrote; --notes-file
+          # replaces them wholesale, so read them back first.
+          gh release view "${GITHUB_REF_NAME}" --json body -q .body > notes.md
+          {
+            echo
+            echo "## Container image"
+            echo
+            echo '```sh'
+            echo "docker pull ghcr.io/${GITHUB_REPOSITORY}:${GITHUB_REF_NAME}"
+            echo '```'
+            echo
+            echo "Immutable digest — pin this in anything automated:"
+            echo
+            echo '```'
+            echo "ghcr.io/${GITHUB_REPOSITORY}@${DIGEST}"
+            echo '```'
+            echo
+            echo "The image carries the core and every in-repo adapter; it supports the"
+            echo "\`docker\` and \`remotehost\` sandbox providers. Read"
+            echo "[docs/docker.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/docs/docker.md)"
+            echo "first: giving a containerised Probavi a daemon means either mounting the"
+            echo "host socket — root-equivalent access to that host — or pointing"
+            echo "\`DOCKER_HOST\` at a remote one."
+          } >> notes.md
+          gh release edit "${GITHUB_REF_NAME}" --notes-file notes.md
