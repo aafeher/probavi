@@ -8,31 +8,31 @@
 
 > **English is authoritative.** Ez a [README.md](README.md) bevezetőjének fordítása, a 2026-08-04-i állapot szerint. Eltérés esetén az angol szöveg az irányadó: a telepítés, a példák és az aktuális képességlista csak angolul naprakész.
 
-*Probavi* — latinul **„bebizonyítottam".** A befejezett múlt a lényeg: nem „teszteljük a visszaállításokat", hanem „ez a visszaállítás megtörtént és bizonyított, itt az aláírt rekord".
+*Probavi* — latinul **„bebizonyítottam”.** A befejezett múlt a lényeg: nem „teszteljük a visszaállításokat”, hanem „ez a visszaállítás megtörtént és bizonyított, itt az aláírt rekord”.
 
 **Vannak mentéseid. De mikor bizonyítottad utoljára, hogy visszaállíthatók?**
 
-A Probavi önállóan üzemeltethető, motorfüggetlen platform **folyamatos visszaállítás-igazolásra**. Nem készít mentést — azt a meglévő eszközeid (pg_dump, pgBackRest, wal-g, mysqldump, …) már jól csinálják. A Probavi dolga az, hogy folyamatosan *bizonyítsa*: azok a mentések tényleg helyreállíthatók.
+A Probavi önállóan üzemeltethető, motorfüggetlen platform **a visszaállítások folyamatos igazolására**. Nem készít mentést — azt a meglévő eszközeid (pg_dump, pgBackRest, wal-g, mysqldump, …) már jól csinálják. A Probavi dolga az, hogy folyamatosan *bizonyítsa*: azok a mentések tényleg helyreállíthatók.
 
-1. Ütemezetten fog egy valódi mentést, és **valódi restore-t** hajt végre egy eldobható, izolált sandboxba (például egy Docker-konténerbe).
-2. **Ellenőrzéseket** futtat a visszaállított adatbázison — az „elindult-e?" kérdéstől a sorszámokon és az adatfrissességen át az egyedi SQL-állításokig.
+1. Ütemezetten fog egy valódi mentést, és **valódi visszaállítást** hajt végre egy eldobható, izolált sandboxba (például egy Docker-konténerbe).
+2. **Ellenőrzéseket** futtat a visszaállított adatbázison — az „elindult-e?” kérdéstől a sorok számán és az adatfrissességen át az egyedi SQL-állításokig.
 3. Az eredményt **aláírt bizonyítékrekordként rögzíti, amelyen minden utólagos módosítás láthatóvá válik**: mit állított vissza, mikor, mennyi ideig tartott, mit ellenőrzött, és mi lett az eredmény.
 
 A kimenet nem egy zöld pipa. Auditálható, kriptográfiailag ellenőrizhető történet a szervezeted helyreállíthatóságáról — a mért visszaállítási időkkel (RTO) és azok időbeli alakulásával együtt.
 
 ## Miért
 
-- A „backup completed successfully" naplósor szinte semmit nem bizonyít. A mentések csendben romlanak el: sérülés, hiányzó WAL-szegmensek, verzióeltérések, elveszett titkosítókulcsok, hónapokon át rossz adatbázisok mentése.
+- A „backup completed successfully” naplósor szinte semmit nem bizonyít. A mentések csendben romlanak el: sérülés, hiányzó WAL-szegmensek, verzióeltérések, elveszett titkosítókulcsok, hónapokon át rossz adatbázisok mentése.
 - A szabályozások egyre inkább *tesztelt és dokumentált* helyreállítási képességet várnak el, nem csupán mentéseket (lásd EU DORA, NIS2 és a NIST vészhelyzeti tervezési ajánlásai).
-- A felhőszolgáltatók a saját menedzselt szolgáltatásaikhoz kínálnak visszaállítás-tesztelést. Ha saját VM-eken, vason vagy vegyes környezetben futtatsz adatbázisokat, nincs semleges, nyílt eszköz, amelyik ezt megtenné helyetted. A Probavi ez az eszköz.
+- A felhőszolgáltatók a saját menedzselt szolgáltatásaikhoz kínálnak visszaállítási tesztelést. Ha saját VM-eken, fizikai gépeken vagy vegyes környezetben futtatsz adatbázisokat, nincs semleges, nyílt eszköz, amelyik ezt megtenné helyetted. A Probavi ez az eszköz.
 
 ## Nem célok
 
-A Probavi **nem** fog mentést készíteni, nem implementál saját ütemezőt, nem kezel adatbázis-hitelesítőadatokat azon túl, amire egy drillnek szüksége van, és nem próbál monitoringplatform lenni. Kicsi mag, éles cél.
+A Probavi **nem** fog mentést készíteni, nem implementál saját ütemezőt, nem kezel adatbázis-hitelesítő adatokat azon túl, amire egy drillnek szüksége van, és nem próbál monitoringplatform lenni. Kis mag, éles fókusz.
 
 ## A CLI is beszél magyarul
 
-`PROBAVI_LANG=hu probavi run --config drill.yaml` — a súgó és a hibaüzenetek magyarul jelennek meg. A gépi kimenetek soha nem fordulnak le: a bizonyítékrekordok, a JSON-összegzések, az adapterprotokoll és a naplók kontraktusok, és mindig angolul maradnak ([docs/i18n.md](docs/i18n.md)).
+`PROBAVI_LANG=hu probavi run --config drill.yaml` — a súgó és a hibaüzenetek magyarul jelennek meg. A gépi kimenetek soha nem fordulnak le: a bizonyítékrekordok, a JSON-összegzések, az adapterprotokoll és a naplók szerződések, és mindig angolul maradnak ([docs/i18n.md](docs/i18n.md)).
 
 ## Tovább (angolul)
 
