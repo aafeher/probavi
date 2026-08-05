@@ -36,7 +36,7 @@ var (
 	translationRe = regexp.MustCompile(`^README\.([a-z]{2})\.md$`)
 	// linkRe matches a translation link in the English README's language row.
 	linkRe = regexp.MustCompile(`\(README\.([a-z]{2})\.md\)`)
-	// versionRe matches a release-version claim (v0.2.0, v1.0, …).
+	// versionRe matches a release-version claim (v1.4.0, v2.0, …).
 	versionRe = regexp.MustCompile(`\bv[0-9]+\.[0-9]+`)
 )
 
