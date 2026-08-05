@@ -115,6 +115,47 @@ always called out explicitly.
 
 ### Fixed
 
+- **A downloaded release could not run a single drill.** The release
+  workflow built `./cmd/probavi` and nothing else, but the core resolves
+  `probavi-adapter-<name>` on `PATH` (AGENTS.md §2.1) — no config
+  override, no bundled fallback, no search directory. So every published
+  archive contained an orchestrator with nothing to orchestrate, and the
+  only working install path was the Quickstart's `git clone` + `go build`.
+  README had no install section at all.
+
+  A release now publishes **one archive per binary**: `probavi` plus a
+  separate `probavi-adapter-<engine>` for each adapter, on the same four
+  platforms, through the same reproducible chain (`CGO_ENABLED=0`,
+  `-trimpath`, empty build id, deterministic tar/gzip), all covered by one
+  `SHA256SUMS`. Twenty archives per release instead of four, deliberately:
+  an adapter is a separately installable thing, distro packaging splits
+  the same way, and if adapters ever move to their own repositories
+  (AGENTS.md §6) these artifact names do not change, so no install breaks.
+
+  The adapters deliberately get no `-X main.version`. Each already carries
+  its own version — the `adapterVersion` const it reports through the
+  protocol, which lands in every signed evidence record as
+  `adapter.version` and moves independently of the release tag. A second,
+  disagreeing number on the same binary would leave an auditor deciding
+  which one is authoritative. The generated release notes instead list
+  each adapter's version, read straight from `docs/capabilities.json`, and
+  state that the compatibility contract is neither number but the adapter
+  protocol version negotiated at handshake.
+
+  `README.md` gains an **Install** section: verify against `SHA256SUMS`,
+  take the core plus an adapter per engine, put both on the same `PATH`.
+  It also records what an auditor needs, which is less — `probavi evidence
+  verify` reads a log and a public key, so the core alone suffices.
+
+  The workflow enumerates adapters with a glob, so a new adapter ships
+  without anyone editing CI. Two new gates in `internal/docs` keep that
+  honest: the set of `adapters/*` directories must equal the set of
+  adapters `docs/capabilities.json` declares — a directory the manifest
+  does not know about would otherwise be built and published as a Probavi
+  adapter — and the workflow must still derive its list from that glob, so
+  the first gate keeps proving something about the release. Both were
+  verified to fail when violated, not merely to pass today.
+
 - The German usage block had one line running past the width the rest of
   the block wraps at, which shows in a terminal as a ragged paragraph. It
   is rewrapped; the block now measures exactly what the English does.
