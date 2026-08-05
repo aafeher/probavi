@@ -80,6 +80,7 @@ Quality tooling (all run in CI on every PR; a red check blocks merge, no excepti
 - `go test -race ./...` always; the race detector is non-negotiable for an orchestrator that manages process lifecycles.
 - Test coverage measured and enforced in CI: coverage must not decrease; `internal/evidence` and `internal/adapter` hold the near-100% target above.
 - `govulncheck` for known-vulnerability scanning of the module graph.
+- An adapter's source may not change without its `adapterVersion` moving (`internal/tools/adapterversion`, pull requests only). The constant reaches every signed evidence record as `adapter.version`, so two builds sharing a version leave an auditor unable to tell them apart. A change that provably cannot alter behaviour is exempted with the `adapter-version-exempt` label, where a reviewer sees it.
 - Comprehensive testing is maintained continuously: every change ships with its tests in the same PR — unit (table-driven), golden-file for protocol/evidence bytes, integration behind the build tag. "Tests later" does not exist.
 
 Common commands (no Makefile yet — standard Go tooling):

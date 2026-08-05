@@ -113,6 +113,37 @@ always called out explicitly.
   conforming. The core-side normalization that makes this true is a
   separate change.
 
+### Added
+
+- **A CI gate that will not let an adapter's source change without its
+  `adapterVersion` moving** (`internal/tools/adapterversion`, wired into
+  `ci.yml` for pull requests).
+
+  The constant is not bookkeeping: each adapter reports it through the
+  protocol and the core signs it into every evidence record as
+  `adapter.version`. Nothing forced it up, so two materially different
+  adapter builds could publish records claiming the same provenance —
+  indistinguishable to the auditor those records exist for.
+
+  What counts as a change is a **deny-list, not an allow-list**, so a file
+  type nobody has thought of yet fails closed. Only four things under an
+  adapter directory are known not to reach its binary and are excluded:
+  `*_test.go`, anything under `testdata/`, `README.md`, and `adapter.json`
+  (read from disk by the capabilities generator, never compiled in). An
+  adapter that grows a `//go:embed` is already covered.
+
+  Two limits are stated in the tool rather than implied. It cannot see a
+  Go toolchain change, which is pinned by `go.mod` and would alter every
+  binary at once — a repository-wide event that should *not* push every
+  adapter's semantic version up, or the number stops meaning anything. And
+  it says nothing about which bytes produced a given record: that is build
+  identity, and the evidence schema carries no digest today.
+
+  The escape hatch is a pull-request label, `adapter-version-exempt`, not
+  a commit marker — a change that genuinely cannot alter behaviour should
+  be waved through where a reviewer can see the waiver. The failure
+  message names the label, so nobody has to go looking for it.
+
 ### Fixed
 
 - **A downloaded release could not run a single drill.** The release

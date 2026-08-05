@@ -197,3 +197,31 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
           (cd spec/evidence && govulncheck ./...)
+
+  adapter-version:
+    name: Adapter version bump
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A pull-request gate by construction: "the source changed" has no
+    # meaning without a base to measure against. The label is the escape
+    # hatch for a change that provably cannot alter behaviour — it sits on
+    # the pull request where a reviewer sees it, rather than hiding in a
+    # commit message.
+    if: >-
+      github.event_name == 'pull_request' &&
+      !contains(github.event.pull_request.labels.*.name, 'adapter-version-exempt')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The gate reads the base commit and the files at it, so the
+          # default single-commit checkout is not enough.
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: adapterVersion moved with the source
+        # An adapter reports adapterVersion through the protocol and the
+        # core signs it into every evidence record as adapter.version. Two
+        # builds publishing the same version leave an auditor unable to
+        # tell them apart, so changing one without the other blocks merge.
+        run: go run ./internal/tools/adapterversion -base "${{ github.event.pull_request.base.sha }}"
