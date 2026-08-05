@@ -12,8 +12,7 @@ source.
 On Linux, packages are attached to the [GitHub
 release](https://github.com/probavi/probavi/releases); you install the
 file. `apt install probavi` will not work, and neither will automatic
-updates. (macOS is different — §5 — because a Homebrew tap needs no
-signing key of its own.)
+updates; macOS is the same story (§5).
 
 That is a deliberate trade. Hosting a signed apt or yum repository means
 a **second long-lived signing key** to guard, in a project whose entire
@@ -152,44 +151,71 @@ checksums both files; nothing is hand-edited.
 
 ## 5. macOS
 
-Install from the Probavi tap. Homebrew picks the right architecture:
+**There is no hosted Probavi Homebrew tap**, for the same reason there is
+no apt repository: it would be one more thing to host and keep in step,
+and the value it adds over a checksummed download is small for a tool run
+from cron.
+
+Two routes, both supported.
+
+### 5.1 The release tarball
 
 ```console
-$ brew install probavi/tap/probavi probavi/tap/probavi-adapter-postgres
+$ ver=0.2.0 arch=arm64        # or amd64 on an Intel Mac
+$ base="https://github.com/probavi/probavi/releases/download/v${ver}"
+$ curl -fsSLO "${base}/probavi_${ver}_darwin_${arch}.tar.gz"
+$ curl -fsSLO "${base}/probavi-adapter-postgres_${ver}_darwin_${arch}.tar.gz"
+$ curl -fsSLO "${base}/SHA256SUMS"
+$ shasum -a 256 -c SHA256SUMS --ignore-missing
+$ tar -xzf "probavi_${ver}_darwin_${arch}.tar.gz" ./probavi
+$ tar -xzf "probavi-adapter-postgres_${ver}_darwin_${arch}.tar.gz" ./probavi-adapter-postgres
+$ sudo install -m0755 probavi probavi-adapter-postgres /usr/local/bin/
 ```
 
-Upgrade with `brew upgrade probavi`, remove with `brew uninstall
-probavi-adapter-postgres probavi`, and drop the tap with `brew untap
-probavi/tap`.
-
-**There is no signed `.pkg`, and none is needed.** Homebrew downloads
-without setting the quarantine attribute, so Gatekeeper does not block
-the binaries. A `.pkg` distributed any other way would need a Developer
-ID certificate, notarisation on every release, and Apple credentials in
-CI — a paid account and a new long-lived secret, for a CLI tool whose
-users already have `brew`.
-
-If you download a release tarball directly instead, macOS *will* attach
-the quarantine attribute and Gatekeeper will refuse to run the binary
-until you clear it:
+A file downloaded this way **is quarantined** by macOS, and Gatekeeper
+will refuse to run it until you clear the attribute:
 
 ```console
-$ xattr -d com.apple.quarantine probavi
+$ xattr -d com.apple.quarantine /usr/local/bin/probavi
+$ xattr -d com.apple.quarantine /usr/local/bin/probavi-adapter-postgres
 ```
 
-That is the honest trade-off of the decision, not a defect to work
-around silently.
+That is the honest cost of shipping without an Apple Developer ID. A
+signed, notarised `.pkg` would remove the step, in exchange for a paid
+Apple account, a signing certificate to guard, and Apple credentials in
+CI — a second long-lived secret, which is exactly what §1 avoids.
+
+### 5.2 Homebrew, in a tap of your own
+
+Every release attaches ready-made formulae, one per binary, with their
+`sha256` taken from that release's own `SHA256SUMS`. They name no tap, so
+they work in any:
+
+```console
+$ brew tap-new "$USER/probavi"
+$ curl -fsSL -o "$(brew --repository "$USER/probavi")/Formula/probavi.rb" \
+    "https://github.com/probavi/probavi/releases/download/v0.2.0/probavi.rb"
+$ curl -fsSL -o "$(brew --repository "$USER/probavi")/Formula/probavi-adapter-postgres.rb" \
+    "https://github.com/probavi/probavi/releases/download/v0.2.0/probavi-adapter-postgres.rb"
+$ brew install "$USER/probavi/probavi" "$USER/probavi/probavi-adapter-postgres"
+```
+
+Homebrew downloads **without setting the quarantine attribute**, so
+nothing needs clearing on this route. Upgrade by replacing the formulae
+with the next release's and running `brew upgrade`; remove with `brew
+uninstall probavi-adapter-postgres probavi`.
+
+The adapter formula depends on `probavi` by plain name, so it resolves to
+whichever tap you put them in.
+
+### 5.3 Before the first drill
 
 **macOS has no native container runtime.** The `docker` sandbox provider
 needs Docker Desktop, colima, OrbStack, or a remote `DOCKER_HOST`; the
-`remotehost` provider needs only an SSH target. Install one before the
-first drill rather than discovering it at teardown time. Everything in
-§7 works unchanged once a runtime is available, with the evidence log and
-key wherever your drill config puts them.
-
-The formulae are attached to each release as well, so the tap can be
-reproduced from a release alone — checksums come straight from that
-release's `SHA256SUMS`.
+`remotehost` provider needs only an SSH target. Install one first rather
+than discovering it at teardown time. Everything in §7 then works
+unchanged, with the evidence log and key wherever your drill config puts
+them.
 
 ## 6. Where things live
 

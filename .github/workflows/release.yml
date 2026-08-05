@@ -213,14 +213,15 @@ jobs:
             echo
             echo "## macOS"
             echo
-            echo '```sh'
-            echo "brew install probavi/tap/probavi probavi/tap/probavi-adapter-postgres"
-            echo '```'
+            echo "Use the \`darwin\` archives above; a directly downloaded file is"
+            echo "quarantined by macOS, so clear it with"
+            echo "\`xattr -d com.apple.quarantine probavi\`."
             echo
-            echo "The formulae are attached here as well, so the tap can be reproduced"
-            echo "from this release alone. Homebrew downloads without setting the"
-            echo "quarantine attribute, so Gatekeeper does not block the binaries —"
-            echo "which is why there is no signed .pkg."
+            echo "The \`.rb\` files attached here are ready-made Homebrew formulae, with"
+            echo "their checksums taken from this release's SHA256SUMS. They name no tap,"
+            echo "so dropping them into one of your own gives a \`brew install\` with no"
+            echo "quarantine step — there is no hosted Probavi tap. See"
+            echo "[docs/packaging.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/docs/packaging.md)."
             echo
             echo "## Reproduce the binaries"
             echo
@@ -247,45 +248,6 @@ jobs:
             dist/*.tar.gz dist/*.deb dist/*.rpm dist/*.apk \
             dist/PKGBUILD dist/*.ebuild dist/Formula/*.rb dist/SHA256SUMS \
             --draft --verify-tag --title "probavi ${GITHUB_REF_NAME}" --notes-file notes.md
-
-  tap:
-    name: Update the Homebrew tap
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: release
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # The formulae pin a sha256 that must match SHA256SUMS exactly, so a
-      # manual copy is the kind of step that goes stale and silently
-      # breaks `brew install`. It is automated with a fine-grained token
-      # scoped to the tap repository alone — the same rule that keeps AUR
-      # manual, where the credential is an unscopeable SSH key on a
-      # third-party host.
-      #
-      # Until that repository and token exist, this step skips itself and
-      # the formulae remain attached to the release, which is enough to
-      # reproduce the tap by hand (docs/packaging.md).
-      - name: push the rendered formulae
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          GH_TOKEN: ${{ github.token }}
-        if: ${{ env.TAP_TOKEN != '' }}
-        run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p formulae
-          gh release download "${GITHUB_REF_NAME}" --pattern '*.rb' --dir formulae
-          git clone --depth 1 \
-            "https://x-access-token:${TAP_TOKEN}@github.com/probavi/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp formulae/*.rb tap/Formula/
-          cd tap
-          git config user.name "Ákos Fehér"
-          git config user.email "aafeher@gmail.com"
-          git add Formula
-          git commit -m "probavi ${VERSION}" || { echo "tap already current"; exit 0; }
-          git push
 
   image:
     name: Publish container image

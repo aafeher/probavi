@@ -115,8 +115,13 @@ always called out explicitly.
 
 ### Added
 
-- **A Homebrew tap for macOS**, `probavi/tap`, with one formula per
-  binary and both architectures selected automatically.
+- **Ready-made Homebrew formulae attached to every release**, one per
+  binary, with both architectures selected automatically. **There is no
+  hosted Probavi tap** — decided 2026-08-05, for the same reason there is
+  no apt repository: one more thing to host and keep in step, for little
+  gain over a checksummed download. The formulae name no tap, so
+  `brew tap-new` plus a `curl` per formula gives a working `brew install`
+  in a tap of your own (`docs/packaging.md` §5.2).
 
   **No signed `.pkg`, and none is needed.** Homebrew downloads without
   setting the quarantine attribute, so Gatekeeper does not block the
@@ -142,12 +147,19 @@ always called out explicitly.
   fires. It earned that on the first run: the initial templates produced
   Ruby that did not parse.
 
-  Pushing to the tap is automated with a token scoped to that repository
-  alone, and the step skips itself until the repository and token exist —
-  the formulae are attached to each release regardless, which is enough
-  to reproduce the tap by hand. Same rule as the Gentoo overlay, and the
-  opposite of AUR, where the credential is an unscopeable SSH key on a
-  third-party host.
+  `docs/packaging.md` §5.1 states the cost of that decision rather than
+  hiding it: a release tarball downloaded **directly** is quarantined by
+  macOS, and Gatekeeper refuses it until `xattr -d com.apple.quarantine`
+  clears the flag. Homebrew does not set the attribute, so §5.2 has no
+  such step. A signed, notarised `.pkg` would remove it everywhere, in
+  exchange for a paid Apple account and a signing certificate to guard —
+  a second long-lived secret, which is what the whole packaging set
+  avoids.
+
+  A gate holds this honest: nothing in the README, the packaging document
+  or the formulae may name `probavi/tap/…` outside a comment. It is a
+  plausible line to write and an install command nobody can run, which is
+  the worst kind of documentation error — it looks tested.
 
 - **Distribution packages for every release**: `.deb`, `.rpm` and `.apk`
   for amd64 and arm64, plus a `PKGBUILD` and a Gentoo ebuild that build

@@ -5,6 +5,10 @@
 # same bytes. Homebrew downloads without setting the quarantine
 # attribute, so Gatekeeper does not block them — which is why there is no
 # signed .pkg and no Apple Developer ID to pay for and guard.
+#
+# There is no hosted Probavi tap. This file is attached to each release
+# so that anyone can drop it into a tap of their own; nothing here names
+# a tap, so it works wherever it lands (docs/packaging.md §5).
 
 class Probavi < Formula
   desc "Continuous restore verification for database backups"
@@ -31,9 +35,10 @@ class Probavi < Formula
   def caveats
     <<~EOS
       probavi cannot run a drill on its own: it resolves an engine adapter
-      as probavi-adapter-<engine> on PATH. Install one per engine, e.g.
+      as probavi-adapter-<engine> on PATH. Install one per engine from the
+      same tap, e.g.
 
-        brew install probavi/tap/probavi-adapter-postgres
+        brew install probavi-adapter-postgres
 
       Verifying an existing evidence log needs neither an adapter nor a
       sandbox runtime — `probavi evidence verify` reads a log and a public
