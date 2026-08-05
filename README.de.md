@@ -8,31 +8,31 @@
 
 > **English is authoritative.** Dies ist eine Übersetzung der Einleitung von [README.md](README.md), Stand 2026-08-04. Bei Abweichungen gilt der englische Text: Installation, Beispiele und die aktuelle Aufstellung der Fähigkeiten sind nur auf Englisch aktuell.
 
-*Probavi* — lateinisch für **„Ich habe bewiesen."** Das Perfekt ist der Punkt: nicht „wir testen Restores", sondern „dieser Restore wurde durchgeführt und bewiesen, hier ist der signierte Datensatz".
+*Probavi* — lateinisch für **„Ich habe bewiesen“.** Das Perfekt ist der Punkt: nicht „wir testen Restores“, sondern „dieser Restore wurde durchgeführt und bewiesen, hier ist der signierte Datensatz“.
 
 **Sie haben Backups. Aber wann haben Sie zuletzt bewiesen, dass sie sich wiederherstellen lassen?**
 
-Probavi ist eine selbst gehostete, engine-unabhängige Plattform für **kontinuierliche Restore-Verifikation**. Sie erstellt keine Backups — das erledigen Ihre vorhandenen Werkzeuge (pg_dump, pgBackRest, wal-g, mysqldump, …) bereits gut. Die Aufgabe von Probavi ist es, fortlaufend zu *beweisen*, dass diese Backups tatsächlich wiederherstellbar sind.
+Probavi ist eine selbst gehostete, engine-unabhängige Plattform für **kontinuierliche Restore-Verifikation**. Probavi erstellt keine Backups — das erledigen Ihre vorhandenen Werkzeuge (pg_dump, pgBackRest, wal-g, mysqldump, …) bereits gut. Die Aufgabe von Probavi ist es, fortlaufend zu *beweisen*, dass diese Backups tatsächlich wiederherstellbar sind.
 
-1. Nach Zeitplan nimmt sie ein echtes Backup und führt einen **echten Restore** in eine verwerfbare, isolierte Sandbox aus (z. B. einen Docker-Container).
-2. Sie führt **Prüfungen** gegen die wiederhergestellte Datenbank aus — von „ist sie gestartet?" über Zeilenzahlen und Datenaktualität bis zu eigenen SQL-Assertions.
-3. Sie hält das Ergebnis in einem **signierten Nachweisdatensatz** fest, der jede nachträgliche Manipulation sichtbar macht: was wiederhergestellt wurde, wann, wie lange es dauerte, was geprüft wurde und wie das Ergebnis lautete.
+1. Nach Zeitplan nimmt Probavi ein echtes Backup und führt einen **echten Restore** in eine verwerfbare, isolierte Sandbox aus (z. B. einen Docker-Container).
+2. Auf der wiederhergestellten Datenbank laufen **Prüfungen** — von „ist sie gestartet?“ über Zeilenzahlen und Datenaktualität bis zu eigenen SQL-Assertions.
+3. Das Ergebnis wird in einem **signierten Nachweisdatensatz** festgehalten, der jede nachträgliche Manipulation sichtbar macht: was wiederhergestellt wurde, wann, wie lange es dauerte, was geprüft wurde und wie das Ergebnis lautete.
 
-Das Ergebnis ist kein grüner Haken. Es ist eine prüffähige, kryptografisch verifizierbare Historie der Wiederherstellbarkeit Ihrer Organisation — einschließlich gemessener Wiederherstellungszeiten (RTO) und ihres Verlaufs.
+Das Ergebnis ist kein grüner Haken. Es ist eine auditfähige, kryptografisch verifizierbare Historie der Wiederherstellbarkeit Ihrer Organisation — einschließlich gemessener Wiederherstellungszeiten (RTO) und ihres Verlaufs.
 
 ## Warum
 
-- Die Logzeile „backup completed successfully" beweist fast nichts. Backups scheitern lautlos: Korruption, fehlende WAL-Segmente, Versionskonflikte, verlorene Verschlüsselungsschlüssel, monatelang die falschen Datenbanken gesichert.
-- Regulierung verlangt zunehmend eine *getestete und dokumentierte* Wiederherstellungsfähigkeit, nicht nur Backups (siehe EU-DORA, NIS2 und die NIST-Leitlinien zur Notfallplanung).
+- Die Logzeile „backup completed successfully“ beweist fast nichts. Backups scheitern lautlos: Datenkorruption, fehlende WAL-Segmente, Versionskonflikte, verlorene Verschlüsselungsschlüssel, monatelang die falschen Datenbanken gesichert.
+- Vorschriften verlangen zunehmend eine *getestete und dokumentierte* Wiederherstellungsfähigkeit, nicht nur Backups (siehe die EU-Verordnung DORA, die NIS2-Richtlinie und die NIST-Leitlinien zur Notfallplanung).
 - Cloud-Anbieter bieten Restore-Tests für ihre eigenen Managed Services an. Wenn Sie Datenbanken auf eigenen VMs, auf Bare Metal oder in einer gemischten Landschaft betreiben, gibt es kein neutrales, offenes Werkzeug, das dies für Sie tut. Probavi ist dieses Werkzeug.
 
 ## Nicht-Ziele
 
-Probavi wird **keine** Backups erstellen, **keinen** eigenen Scheduler implementieren, **keine** Datenbank-Zugangsdaten über das hinaus verwalten, was ein Drill braucht, und **nicht** versuchen, eine Monitoring-Plattform zu sein. Kleiner Kern, scharfer Zweck.
+Probavi wird **keine** Backups erstellen, **keinen** eigenen Scheduler implementieren, **keine** Datenbank-Zugangsdaten über das hinaus verwalten, was ein Drill braucht, und **nicht** versuchen, eine Monitoring-Plattform zu sein. Kleiner Kern, scharf umrissener Zweck.
 
 ## Die CLI spricht auch Deutsch
 
-`PROBAVI_LANG=de probavi run --config drill.yaml` — Hilfetext und Diagnosemeldungen erscheinen auf Deutsch. Maschinelle Ausgaben werden nie übersetzt: Nachweisdatensätze, JSON-Zusammenfassungen, das Adapterprotokoll und die Logs sind Verträge und bleiben überall englisch ([docs/i18n.md](docs/i18n.md)).
+`PROBAVI_LANG=de probavi run --config drill.yaml` — Hilfetext und Diagnosemeldungen erscheinen auf Deutsch. Maschinelle Ausgaben werden nie übersetzt: Nachweisdatensätze, JSON-Zusammenfassungen, das Adapterprotokoll und die Logs sind Verträge und bleiben immer auf Englisch ([docs/i18n.md](docs/i18n.md)).
 
 ## Weiter (auf Englisch)
 

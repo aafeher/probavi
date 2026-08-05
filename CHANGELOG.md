@@ -33,10 +33,10 @@ always called out explicitly.
   the committed files disagree. Same principle as the catalog gates of
   `docs/i18n.md` §4: a translation may exist here only while a machine
   can prove it is current. Terminology follows each language's shipped
-  CLI catalog, so the README and the terminal agree. **The German,
-  French, and Spanish texts shipped without a native-speaker review
-  pass** (docs/i18n.md §5); that review is owed, and corrections will
-  follow.
+  CLI catalog, so the README and the terminal agree. All four texts have
+  since been through the linguistic review recorded under *Changed*
+  below; native-speaker feedback remains welcome and is folded in as it
+  arrives (docs/i18n.md §5).
 
 - The independent evidence verifier has a tagged, pinnable release:
   `spec/evidence/v0.2.0`. It lives in its own Go module, so it carries its
@@ -54,6 +54,44 @@ always called out explicitly.
   `@latest` keeps working and stays the recommended default for casual use.
 
 ### Changed
+
+- **A full linguistic review of every translated surface** — all 23 locale
+  catalogs and all four README translations — landing 170 catalog
+  corrections and the terminology and typography rules behind them
+  (`docs/i18n.md` §8, new and normative).
+
+  The headline finding is a product-level one, not a wording one:
+  **nineteen of the twenty-three catalogs used the same word for a *drill*
+  and for a *game-day*.** Both render as "exercise" in most European
+  languages, so a localized operator could not tell one restore proof from
+  an exercise made of many. Where the collision exists the game-day is now
+  named `game-day` — a term already untranslated in every catalog — while
+  the drill keeps the language's own word. Two further distinctions the
+  product depends on are now stated and applied: *restore* against
+  *recovery/recoverability*, and the frozen protocol *conformance checks*
+  against a drill's *validation checks*.
+
+  The rest are ordinary translation defects, each verified against the
+  English source: `hard wall-clock limit` had been flattened to "time
+  limit" in twenty catalogs, dropping the fact that the limit is on real
+  elapsed time; Swedish said "dependencies to a failed member" where the
+  English says *dependents of*; five catalogs left a bare adjective where
+  the noun it modified had been dropped; Danish had a wrong-gender pronoun
+  and a wrong-gender article; Greek left an English word (`mode`) inside a
+  Greek sentence, and Greek and Irish both described the frozen check list
+  with the word for *frozen solid*. In the READMEs: Hungarian rendered
+  "row counts" as *ordinal numbers*, Spanish rendered "data freshness"
+  with the word used for food and inverted the range it appears in,
+  German used *Korruption* — bribery, not data corruption — and both
+  German and Hungarian closed their opening typographic quote with an
+  ASCII `"`.
+
+  Three of the four open questions from the translations' own review notes
+  are answered in `docs/i18n.md` §8 rather than left to the next
+  translator: the drill/game-day and restore/recovery splits above, and
+  French spacing — the README takes the non-breaking space French
+  typography requires, the catalogs keep a plain space, because terminal
+  output is grepped and copied.
 
 - **Specs:** `docs/adapter-protocol.md` §6.2 and `docs/evidence-schema.md`
   §3 now state the `created_at` contract that neither of them carried: the

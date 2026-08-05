@@ -216,7 +216,7 @@ func TestLoadHungarianDiagnostics(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load accepted an invalid config")
 	}
-	for _, want := range []string{"érvénytelen konfiguráció", "a target.name megadása kötelező"} {
+	for _, want := range []string{"konfiguráció érvénytelen", "a target.name megadása kötelező"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}
