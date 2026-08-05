@@ -170,7 +170,7 @@ func TestEvidenceRecordViolations(t *testing.T) {
 		line   int
 		mutate func(t *testing.T, m map[string]any)
 	}{
-		{"unpublished schema version", 0, func(_ *testing.T, m map[string]any) { m["schema"] = "probavi-evidence/2" }},
+		{"unpublished schema version", 0, func(_ *testing.T, m map[string]any) { m["schema"] = "probavi-evidence/3" }},
 		{"unknown top-level field", 0, func(_ *testing.T, m map[string]any) { m["comment"] = "forged" }},
 		{"missing env", 0, func(_ *testing.T, m map[string]any) { delete(m, "env") }},
 		{"v1 drill without pitr_target", 0, func(t *testing.T, m map[string]any) {
