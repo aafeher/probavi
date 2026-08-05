@@ -1,5 +1,5 @@
 // Package evidence is an independent verifier for the Probavi evidence log
-// format, schema versions probavi-evidence/0 and probavi-evidence/1.
+// format, schema versions probavi-evidence/0, /1 and /2.
 //
 // It is deliberately a *second* implementation. It was written from
 // docs/evidence-schema.md alone and shares no code with the Probavi core:

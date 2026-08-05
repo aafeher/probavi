@@ -382,10 +382,12 @@ needs before the core may emit one:
 - [x] The §3 example is a v2 record and CI validates it against the
       schema, so the document and its derived schema cannot drift.
       Done 2026-08-05.
-- [ ] `spec/evidence` accepts `probavi-evidence/2`. Until it does, no v2
-      record may be written: §10 obliges every verifier to support every
-      published version, and the independent verifier is the one that
-      matters most.
+- [x] `spec/evidence` accepts `probavi-evidence/2`, with a v2 record shown
+      to verify against the committed public key, a v1→v2 chain shown to
+      run straight through, and `probavi-evidence/3` still refused. A test
+      pins the verifier's supported set to the versions this schema
+      publishes, in both directions — §10 as a gate rather than a promise.
+      Done 2026-08-05.
 - [ ] Worked example: a byte-exact signed `log_v2.jsonl` beside the v0 and
       v1 vectors (§12), which requires a writer.
 - [ ] The core populates both digests.

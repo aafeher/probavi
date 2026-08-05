@@ -38,6 +38,7 @@ const genesisPrevHash = "sha256:000000000000000000000000000000000000000000000000
 var supportedSchemas = map[string]bool{
 	"probavi-evidence/0": true,
 	"probavi-evidence/1": true,
+	"probavi-evidence/2": true,
 }
 
 // Result is the outcome of verifying one log.
