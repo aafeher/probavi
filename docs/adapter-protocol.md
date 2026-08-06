@@ -252,9 +252,10 @@ Response payload:
   "protocol_versions": ["probavi-adapter/0"],
   "engine": {"name": "postgresql"},
   "sources": [
-    {"kind": "pgdump",      "capabilities": {"pitr": false}},
-    {"kind": "pgdump_dir",  "capabilities": {"pitr": false}},
-    {"kind": "pgbackrest",  "capabilities": {"pitr": true}}
+    {"kind": "pgdump",              "capabilities": {"pitr": false}},
+    {"kind": "pgdump_dir",          "capabilities": {"pitr": false}},
+    {"kind": "pgdump_with_globals", "capabilities": {"pitr": false}},
+    {"kind": "pgbackrest",          "capabilities": {"pitr": true}}
   ],
   "sql_runner": {
     "argv": ["psql", "-U", "{{user}}", "-d", "{{database}}", "-tA", "-v", "ON_ERROR_STOP=1", "-c", "{{sql}}"],
