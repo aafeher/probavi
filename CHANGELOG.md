@@ -11,6 +11,8 @@ always called out explicitly.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-07
+
 ### Added
 
 - **`pgdump_with_globals`, a PostgreSQL source kind that restores the
@@ -1099,7 +1101,8 @@ First tagged release. Everything below is new.
 - `probavi version`: prints the binary version and the contract versions
   the build speaks.
 
-[Unreleased]: https://github.com/probavi/probavi/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/probavi/probavi/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/probavi/probavi/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/probavi/probavi/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/probavi/probavi/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/probavi/probavi/compare/v0.1.0...v0.2.0
