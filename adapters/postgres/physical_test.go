@@ -56,7 +56,7 @@ func TestDirChecksum(t *testing.T) {
 
 func TestResolveRepo(t *testing.T) {
 	repo := writeRepoFixture(t)
-	src, perr := resolveSource("pgbackrest", repo)
+	src, perr := resolveSource("pgbackrest", repo, nil)
 	if perr != nil {
 		t.Fatalf("resolveSource: %+v", perr)
 	}
@@ -68,10 +68,10 @@ func TestResolveRepo(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, perr := resolveSource("pgbackrest", file); perr == nil || perr.Code != "invalid_request" {
+	if _, perr := resolveSource("pgbackrest", file, nil); perr == nil || perr.Code != "invalid_request" {
 		t.Errorf("file as repo: %+v, want invalid_request", perr)
 	}
-	if _, perr := resolveSource("pgbackrest", filepath.Join(t.TempDir(), "gone")); perr == nil || perr.Code != "source_not_found" {
+	if _, perr := resolveSource("pgbackrest", filepath.Join(t.TempDir(), "gone"), nil); perr == nil || perr.Code != "source_not_found" {
 		t.Errorf("missing repo: %+v, want source_not_found", perr)
 	}
 }
@@ -332,7 +332,7 @@ func TestRepoNewestMtimeIsCreatedAt(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(repo, "backup/demo/backup.info"), old, old); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
-	src, perr := resolveSource("pgbackrest", repo)
+	src, perr := resolveSource("pgbackrest", repo, nil)
 	if perr != nil {
 		t.Fatalf("resolveSource: %+v", perr)
 	}

@@ -11,6 +11,57 @@ always called out explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- **`pgdump_with_globals`, a PostgreSQL source kind that restores the
+  cluster globals before the dump** (postgres adapter 0.4.0; reported in
+  #84). A logical recovery has two steps — `pg_dumpall --globals-only`,
+  then the database dumps — and no `pg_dump` carries the first. A drill
+  restoring only the dump proved the second half of a two-step path, and
+  its `backup.checksum` covered only the dump, so the record claimed less
+  than the recovery it stood for. `pg_restore --no-owner` drops `OWNER TO`
+  but never `GRANT`, so such a restore dies on the first grant naming a
+  role nothing created — the drill was right, and the gap was what came
+  after it.
+
+  The source is one directory with both members named in `source.params`
+  (`globals`, and optionally `dump`; plain filenames, never paths).
+  Explicit names rather than a filename pattern: renaming a backup file
+  must not silently change what a drill proves. One directory rather than
+  two paths because the core only hands an adapter files belonging to the
+  drill's configured backup source (protocol §4.2), a guard that exists so
+  a third-party adapter binary cannot pull arbitrary host files into a
+  sandbox it controls. Leaving `dump` out restores the newest file that is
+  not the globals, so a rotating backup directory keeps working
+  unattended; naming it lets one directory serve several databases, each
+  drilled separately with its own checks and its own record.
+
+  `backup.checksum` covers **both** members — a checksum blind to the
+  globals would let the roles a restore depends on change without the
+  evidence noticing — using the tree hash's framing over exactly the two
+  chosen members, so a sibling database's backup never moves this drill's
+  identity. `backup.created_at` is the **older** member's mtime: a set is
+  only as current as its stalest part, and stale globals are the gap being
+  closed. The globals load counts into the measured restore duration,
+  because the recovery it stands for includes it.
+
+  **No evidence schema change** (v2 stays frozen; `backup.kind` carries
+  the new value) and **no core change** — the second extension axis proven
+  again.
+
+  Two behaviours were measured against a real cluster rather than assumed,
+  and both shaped the implementation: `pg_dumpall` emits `CREATE ROLE` for
+  the bootstrap superuser as well, so **every** globals script collides
+  with the role `initdb` already created. That one error — and only that
+  one, for the connected superuser — is tolerated; `ON_ERROR_STOP` stays
+  off, because the collision sits mid-script and stopping there would
+  silently skip every role sorting after it, making a drill's completeness
+  depend on role naming. And a globals script carries role password
+  verifiers, which PostgreSQL quotes back in syntax errors: `--echo-errors`
+  is refused, and SQL password literals are scrubbed from every engine
+  diagnostic before it can reach a protocol message and, through it, a
+  signed record (evidence schema §8).
+
 ## [0.3.1] - 2026-08-05
 
 ### Fixed

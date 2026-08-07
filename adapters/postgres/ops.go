@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const (
 	adapterName    = "postgres"
-	adapterVersion = "0.3.0"
+	adapterVersion = "0.4.0"
 
 	defaultUser     = "postgres"
 	defaultDatabase = "postgres"
@@ -32,6 +33,7 @@ func probePayload() any {
 		"sources": []map[string]any{
 			{"kind": "pgdump", "capabilities": map[string]bool{"pitr": false}},
 			{"kind": "pgdump_dir", "capabilities": map[string]bool{"pitr": false}},
+			{"kind": "pgdump_with_globals", "capabilities": map[string]bool{"pitr": false}},
 			{"kind": "pgbackrest", "capabilities": map[string]bool{"pitr": true}},
 		},
 		"sql_runner": map[string]any{
@@ -78,7 +80,7 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 		scratch = "/tmp"
 	}
 
-	src, perr := resolveSource(req.Source.Kind, req.Source.Path)
+	src, perr := resolveSource(req.Source.Kind, req.Source.Path, req.Source.Params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -94,7 +96,24 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 	}
 	logger.Info("engine ready", "seconds", readySeconds)
 
+	state := map[string]any{"database": database, "user": user}
+	// Cluster globals go in before the dump: a restored GRANT names roles
+	// that must already exist. Their load is part of the restore, not a
+	// phase of its own — the measured restore duration is the drill's RTO
+	// figure, and the real recovery path includes this step.
+	var globalsTransfer, globalsRestore float64
+	if src.globalsPath != "" {
+		globalsInSandbox := scratch + "/probavi-globals.sql"
+		globalsTransfer, globalsRestore, perr = loadGlobals(ctx, c, user, src.globalsPath, globalsInSandbox)
+		if perr != nil {
+			return nil, perr
+		}
+		logger.Info("cluster globals loaded", "seconds", globalsRestore)
+		state["globals_path"] = globalsInSandbox
+	}
+
 	dumpInSandbox := scratch + "/probavi-restore.dump"
+	state["dump_path"] = dumpInSandbox
 	put, perr := c.putFile(ctx, putFileArgs{SourcePath: src.path, DestPath: dumpInSandbox, Mode: "0600"})
 	if perr != nil {
 		return nil, perr
@@ -119,10 +138,10 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 		},
 		"timings": map[string]any{
 			"engine_ready_seconds": readySeconds,
-			"transfer_seconds":     put.DurationSeconds,
-			"restore_seconds":      restore.DurationSeconds,
+			"transfer_seconds":     globalsTransfer + put.DurationSeconds,
+			"restore_seconds":      globalsRestore + restore.DurationSeconds,
 		},
-		"state": map[string]any{"database": database, "user": user, "dump_path": dumpInSandbox},
+		"state": state,
 	}, nil
 }
 
@@ -229,6 +248,21 @@ func firstLine(b []byte) string {
 		s = s[:i]
 	}
 	// The message crosses the protocol as a JSON string and lands in
-	// evidence error fields: keep it single-line and quote-free.
-	return strings.ReplaceAll(s, `"`, "'")
+	// evidence error fields: keep it single-line, quote-free, and free of
+	// credentials.
+	return strings.ReplaceAll(scrubSecrets(s), `"`, "'")
+}
+
+// passwordLiteral matches a SQL password literal. A cluster-globals script
+// carries every role's password verifier (ALTER ROLE … PASSWORD
+// 'SCRAM-SHA-256$…'), and PostgreSQL quotes the offending source text back
+// in syntax errors — so engine diagnostics are a live path from a backup's
+// credentials into a signed evidence record, which the schema forbids from
+// carrying any (evidence schema §8).
+var passwordLiteral = regexp.MustCompile(`(?i)password\s+'[^']*'`)
+
+// scrubSecrets removes credential material from text bound for a protocol
+// message.
+func scrubSecrets(s string) string {
+	return passwordLiteral.ReplaceAllString(s, "PASSWORD '[redacted]'")
 }

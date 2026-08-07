@@ -318,6 +318,304 @@ func TestProvisionHappyPath(t *testing.T) {
 	assertProvisionResult(t, f.Payload)
 }
 
+// withGlobalsPayload is a provision request for the two-member kind: one
+// source directory, both members named in params.
+func withGlobalsPayload(dir string) string {
+	return fmt.Sprintf(`{"source":{"kind":"pgdump_with_globals","path":%q,`+
+		`"params":{"globals":"globals.sql","dump":"orders.dump"},`+
+		`"credential_env":[]},"sandbox":{"scratch_dir":"/scratch"},"options":{}}`, dir)
+}
+
+// globalsFixtureBody is the globals script every unit-level fixture uses;
+// its bytes only have to be stable, never valid SQL — no engine runs here.
+const globalsFixtureBody = "CREATE ROLE app_ro;\n"
+
+// writeGlobalsSet builds a source directory and returns it with the two
+// member paths the adapter is expected to transfer.
+func writeGlobalsSet(t *testing.T, dumpBody string) (dir, globals, dump string) {
+	t.Helper()
+	dir = t.TempDir()
+	globals = filepath.Join(dir, "globals.sql")
+	dump = filepath.Join(dir, "orders.dump")
+	for path, body := range map[string]string{globals: globalsFixtureBody, dump: dumpBody} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	return dir, globals, dump
+}
+
+// TestProvisionWithGlobals pins the order and the shape of the added step.
+//
+// The globals must be in before the dump — a restored GRANT names roles
+// that have to exist already — and the psql invocation is load-bearing in
+// two directions: ON_ERROR_STOP must stay off (the bootstrap-role
+// collision sits in the middle of every globals script, and stopping there
+// would silently skip the roles after it), while --echo-errors must stay
+// absent (it echoes statements, and those carry password verifiers).
+func TestProvisionWithGlobals(t *testing.T) {
+	dir, globals, dump := writeGlobalsSet(t, "FAKE-PGDUMP-BYTES")
+
+	var order []string
+	line, _, exit := driveOp(t, "provision", withGlobalsPayload(dir),
+		withGlobalsHandler(t, globals, dump, &order))
+	if exit != 0 {
+		t.Fatalf("exit = %d", exit)
+	}
+	f := parseFinal(t, line)
+	if !f.OK {
+		t.Fatalf("final = %+v", f)
+	}
+
+	want := []string{"pg_isready", "put:/scratch/probavi-globals.sql", "psql",
+		"put:/scratch/probavi-restore.dump", "pg_restore"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Errorf("call order = %v, want %v — globals load before the dump", order, want)
+	}
+
+	res := provisionWire{}
+	if err := json.Unmarshal(f.Payload, &res); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	// Both transfers and both loads are accounted for. The restore figure
+	// is the drill's measured RTO, and a real recovery loads the globals.
+	// Binary-exact fractions: the sums are asserted, not approximated.
+	if res.Timings.Transfer != 0.25+0.5 {
+		t.Errorf("transfer_seconds = %v, want both transfers", res.Timings.Transfer)
+	}
+	if res.Timings.Restore != 0.5+1.5 {
+		t.Errorf("restore_seconds = %v, want the globals load counted into the restore", res.Timings.Restore)
+	}
+	if res.SourceIdentity.SizeBytes != int64(len("FAKE-PGDUMP-BYTES")+len(globalsFixtureBody)) {
+		t.Errorf("size_bytes = %d, want both members", res.SourceIdentity.SizeBytes)
+	}
+	if res.State["globals_path"] != "/scratch/probavi-globals.sql" {
+		t.Errorf("state = %+v, want the staged globals recorded", res.State)
+	}
+}
+
+// withGlobalsHandler simulates a sandbox where every verb succeeds,
+// recording the call order and asserting each call's shape.
+func withGlobalsHandler(t *testing.T, globals, dump string, order *[]string) func(verbCall) (any, *protoError) {
+	return func(call verbCall) (any, *protoError) {
+		switch call.Verb {
+		case "put_file":
+			args := putFileArgs{}
+			if err := json.Unmarshal(call.Args, &args); err != nil {
+				t.Fatalf("put_file args: %v", err)
+			}
+			*order = append(*order, "put:"+args.DestPath)
+			return withGlobalsPutFile(t, args, globals, dump), nil
+		case "exec":
+			args := execArgs{}
+			if err := json.Unmarshal(call.Args, &args); err != nil {
+				t.Fatalf("exec args: %v", err)
+			}
+			*order = append(*order, args.Argv[0])
+			return withGlobalsExec(t, args), nil
+		}
+		return nil, protoErr("internal", false, "unexpected verb")
+	}
+}
+
+func withGlobalsPutFile(t *testing.T, args putFileArgs, globals, dump string) any {
+	t.Helper()
+	if args.Mode != "0600" {
+		t.Errorf("put_file mode = %q, want 0600", args.Mode)
+	}
+	switch args.DestPath {
+	case "/scratch/probavi-globals.sql":
+		if args.SourcePath != globals {
+			t.Errorf("globals put_file source = %s, want %s", args.SourcePath, globals)
+		}
+		return putFileValue{DurationSeconds: 0.25}
+	case "/scratch/probavi-restore.dump":
+		if args.SourcePath != dump {
+			t.Errorf("dump put_file source = %s, want %s", args.SourcePath, dump)
+		}
+		return putFileValue{DurationSeconds: 0.5}
+	}
+	t.Fatalf("unexpected put_file dest %s", args.DestPath)
+	return nil
+}
+
+func withGlobalsExec(t *testing.T, args execArgs) any {
+	t.Helper()
+	switch args.Argv[0] {
+	case "pg_isready":
+		return okExec(0)
+	case "psql":
+		assertGlobalsArgv(t, args.Argv)
+		return execValue{ExitCode: 0, DurationSeconds: 0.5}
+	case "pg_restore":
+		return execValue{ExitCode: 0, DurationSeconds: 1.5}
+	}
+	t.Fatalf("unexpected exec %v", args.Argv)
+	return nil
+}
+
+func assertGlobalsArgv(t *testing.T, argv []string) {
+	t.Helper()
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "-f /scratch/probavi-globals.sql") {
+		t.Errorf("globals argv = %v, want psql -f over the staged script — pg_dumpall wraps its "+
+			"output in \\restrict meta-commands that only a file-reading session executes", argv)
+	}
+	if !strings.Contains(joined, "ON_ERROR_STOP=0") {
+		t.Errorf("globals argv = %v, want ON_ERROR_STOP explicitly off: the bootstrap-role "+
+			"collision sits mid-script and stopping there skips the roles after it", argv)
+	}
+	if strings.Contains(joined, "--echo-errors") {
+		t.Errorf("globals argv = %v, must not echo statements — they carry password verifiers", argv)
+	}
+}
+
+// TestProvisionWithGlobalsFailures proves a bad globals load never reaches
+// the dump: a partial cluster must not be restored into and reported as a
+// pass.
+func TestProvisionWithGlobalsFailures(t *testing.T) {
+	dir, _, _ := writeGlobalsSet(t, "X")
+
+	tests := []struct {
+		name    string
+		psql    any
+		wantMsg string
+	}{
+		{"an unrelated error fails the drill",
+			errExec(0, `psql:g.sql:31: ERROR:  permission denied to create role`),
+			"permission denied"},
+		{"psql itself failing fails the drill",
+			errExec(2, `psql: error: could not open file: No such file or directory`),
+			"could not open file"},
+		{"a client failure with no classified error still fails",
+			errExec(2, ""),
+			"psql exited 2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			line, calls, _ := driveOp(t, "provision", withGlobalsPayload(dir),
+				globalsLoadHandler(t, tt.psql, false))
+			f := parseFinal(t, line)
+			if f.OK || f.Error.Code != "restore_failed" {
+				t.Fatalf("final = %+v, want restore_failed", f)
+			}
+			if !strings.Contains(f.Error.Message, tt.wantMsg) {
+				t.Errorf("message = %q, want it to name %q", f.Error.Message, tt.wantMsg)
+			}
+			// isready, put globals, psql — and nothing after.
+			if len(calls) != 3 {
+				t.Errorf("calls = %d, want 3: the dump must not be restored on top of a "+
+					"half-loaded cluster", len(calls))
+			}
+		})
+	}
+}
+
+// globalsLoadHandler answers the readiness poll and the globals load with
+// psql. Unless allowRestore is set, anything the adapter attempts after a
+// rejected globals load fails the test.
+func globalsLoadHandler(t *testing.T, psql any, allowRestore bool) func(verbCall) (any, *protoError) {
+	return func(call verbCall) (any, *protoError) {
+		if call.Verb == "put_file" {
+			return putFileValue{}, nil
+		}
+		args := execArgs{}
+		if err := json.Unmarshal(call.Args, &args); err != nil {
+			t.Fatalf("exec args: %v", err)
+		}
+		switch {
+		case args.Argv[0] == "pg_isready":
+			return okExec(0), nil
+		case args.Argv[0] == "psql":
+			return psql, nil
+		case allowRestore:
+			return execValue{ExitCode: 0, DurationSeconds: 1}, nil
+		}
+		t.Errorf("reached %v after a rejected globals load", args.Argv)
+		return okExec(0), nil
+	}
+}
+
+// TestProvisionWithGlobalsSandboxFailure keeps the outcome classification
+// honest across the added step.
+//
+// A sandbox that dies while the globals are being staged says nothing
+// about the backup. The evidence schema separates the two outcomes for
+// exactly this reason — `fail` is a verdict on the backup, `error` is
+// infrastructure — and reporting a lost container as `restore_failed`
+// would put a false negative into an append-only log.
+func TestProvisionWithGlobalsSandboxFailure(t *testing.T) {
+	dir, _, _ := writeGlobalsSet(t, "X")
+	for _, tt := range []struct {
+		name string
+		fail string // verb that fails
+	}{
+		{"while transferring the globals", "put_file"},
+		{"while replaying the globals", "exec"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			line, _, _ := driveOp(t, "provision", withGlobalsPayload(dir), failingVerbHandler(t, tt.fail))
+			f := parseFinal(t, line)
+			if f.OK || f.Error.Code != "sandbox_error" {
+				t.Errorf("final = %+v, want sandbox_error — a lost container is not a verdict "+
+					"about the backup", f)
+			}
+		})
+	}
+}
+
+// failingVerbHandler answers the readiness poll, then fails the named verb
+// the way a dying sandbox would.
+func failingVerbHandler(t *testing.T, fail string) func(verbCall) (any, *protoError) {
+	return func(call verbCall) (any, *protoError) {
+		if call.Verb == "exec" {
+			args := execArgs{}
+			if err := json.Unmarshal(call.Args, &args); err != nil {
+				t.Fatalf("exec args: %v", err)
+			}
+			if args.Argv[0] == "pg_isready" {
+				return okExec(0), nil
+			}
+		}
+		if call.Verb == fail {
+			return nil, protoErr("sandbox_error", true, "container gone")
+		}
+		return putFileValue{}, nil
+	}
+}
+
+// TestProvisionToleratesBootstrapRoleCollision covers the one diagnostic
+// every real globals script produces: pg_dumpall emits CREATE ROLE for the
+// bootstrap superuser, which initdb created before the drill started.
+// Treating it as a failure would make the kind useless in every setup.
+func TestProvisionToleratesBootstrapRoleCollision(t *testing.T) {
+	dir, _, _ := writeGlobalsSet(t, "X")
+	stderr := `psql:/scratch/probavi-globals.sql:20: ERROR:  role "postgres" already exists`
+
+	line, calls, _ := driveOp(t, "provision", withGlobalsPayload(dir),
+		globalsLoadHandler(t, errExec(0, stderr), true))
+	f := parseFinal(t, line)
+	if !f.OK {
+		t.Fatalf("final = %+v — every globals script collides with the bootstrap superuser "+
+			"initdb already created", f)
+	}
+	if len(calls) != 5 {
+		t.Errorf("calls = %d, want the restore to proceed", len(calls))
+	}
+}
+
+// TestProvisionWithGlobalsRefusesPITR keeps the logical kinds honest: a
+// dump is a single frozen snapshot, whatever the globals add.
+func TestProvisionWithGlobalsRefusesPITR(t *testing.T) {
+	dir, _, _ := writeGlobalsSet(t, "X")
+	payload := fmt.Sprintf(`{"source":{"kind":"pgdump_with_globals","path":%q,`+
+		`"params":{"globals":"globals.sql"}},`+
+		`"sandbox":{},"options":{},"pitr":{"target_time":"2026-07-30T14:32:00Z"}}`, dir)
+	assertProvisionFailure(t, payload,
+		func(verbCall) (any, *protoError) { return nil, protoErr("internal", false, "must not be called") },
+		"invalid_request", 0)
+}
+
 func TestProvisionFailures(t *testing.T) {
 	fixture := writeFixture(t, "X")
 	readyThen := func(rest func(call verbCall) (any, *protoError)) func(verbCall) (any, *protoError) {

@@ -167,6 +167,139 @@ func TestCorruptDumpVerdict(t *testing.T) {
 	}
 }
 
+// TestGlobalsDrillEndToEnd is the reproduction of the gap the
+// pgdump_with_globals kind closes, driven end to end against real Docker.
+//
+// The setup is the common one: per-database `pg_dump -Fc`, cluster
+// objects taken separately with `pg_dumpall --globals-only`. A logical
+// recovery runs the globals first, then the dumps — and a drill that can
+// only do the second half proves less than the recovery it stands for.
+// `pg_restore --no-owner` drops OWNER TO but never GRANT, so the restore
+// dies on the first grant naming a role that was never created.
+//
+// The test asserts both halves, because either alone is worthless: the
+// plain pgdump kind must still FAIL on this backup (the drill was right,
+// the backup really is incomplete on its own), and the with-globals kind
+// must PASS with the grant present and pointing at the restored role.
+func TestGlobalsDrillEndToEnd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	binDir := t.TempDir()
+	if out, err := exec.CommandContext(ctx, "go", "build", "-o",
+		filepath.Join(binDir, "probavi-adapter-postgres"), ".").CombinedOutput(); err != nil {
+		t.Fatalf("build adapter: %v: %s", err, out)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	provider := docker.New(nil)
+	params := map[string]string{"image": verifiedImage(t), "env.POSTGRES_HOST_AUTH_METHOD": "trust"}
+
+	fixtureDir := t.TempDir()
+	dump := filepath.Join(fixtureDir, "orders.dump")
+	globals := filepath.Join(fixtureDir, "globals.sql")
+	makeGrantedFixture(t, ctx, provider, params, dump, globals)
+
+	runner, err := adapter.New("postgres", nil, nil)
+	if err != nil {
+		t.Fatalf("resolve adapter: %v", err)
+	}
+
+	t.Run("without the globals the restore fails", func(t *testing.T) {
+		sbx, err := provider.Create(ctx, params)
+		if err != nil {
+			t.Fatalf("create sandbox: %v", err)
+		}
+		defer destroy(t, sbx)
+
+		_, err = runner.Provision(ctx, &adapter.ProvisionRequest{
+			Source:  adapter.ProvisionSource{Kind: "pgdump", Path: dump},
+			Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
+		}, sbx)
+		var aerr *adapter.Error
+		if err == nil || !errors.As(err, &aerr) || aerr.Code != "restore_failed" {
+			t.Fatalf("provision error = %v, want restore_failed — the dump's grants name a "+
+				"role no dump carries", err)
+		}
+	})
+
+	t.Run("with the globals the restore passes", func(t *testing.T) {
+		sbx, err := provider.Create(ctx, params)
+		if err != nil {
+			t.Fatalf("create sandbox: %v", err)
+		}
+		defer destroy(t, sbx)
+
+		res, err := runner.Provision(ctx, &adapter.ProvisionRequest{
+			Source: adapter.ProvisionSource{
+				Kind: "pgdump_with_globals", Path: fixtureDir,
+				Params: map[string]string{
+					"globals": filepath.Base(globals), "dump": filepath.Base(dump),
+				},
+			},
+			Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
+		}, sbx)
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		if res.Timings.RestoreSeconds <= 0 {
+			t.Errorf("timings = %+v, want the globals load and the restore measured", res.Timings)
+		}
+
+		health, err := runner.Healthcheck(ctx, &res.Connection, res.State, sbx)
+		if err != nil || !health.Healthy {
+			t.Fatalf("healthcheck = %+v err=%v", health, err)
+		}
+
+		// The grant is the proof: it exists only if the role it names was
+		// created by the globals load before pg_restore replayed it.
+		out, err := sbx.Exec(ctx, sandbox.ExecRequest{Argv: []string{
+			"psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "postgres", "-tA", "-c",
+			"SELECT grantee FROM information_schema.role_table_grants " +
+				"WHERE table_name = 'orders' AND grantee = 'app_ro'"}})
+		if err != nil {
+			t.Fatalf("grant query: %v", err)
+		}
+		if got := strings.TrimSpace(string(out.Stdout)); got != "app_ro" {
+			t.Fatalf("grantee = %q (exit %d, stderr %s), want app_ro — the cluster role did not "+
+				"survive the restore", got, out.ExitCode, out.Stderr)
+		}
+		if _, err := runner.Teardown(ctx, res.State, "completed", sbx); err != nil {
+			t.Fatalf("teardown: %v", err)
+		}
+	})
+}
+
+// makeGrantedFixture seeds a cluster whose dump cannot stand alone: a
+// login role, a password on it (so the globals carry a real verifier), and
+// a table grant that references the role. It writes the two artifacts a
+// logical recovery needs — the database dump and the cluster globals.
+func makeGrantedFixture(t *testing.T, ctx context.Context, provider *docker.Provider, params map[string]string, dump, globals string) {
+	t.Helper()
+	seed, err := provider.Create(ctx, params)
+	if err != nil {
+		t.Fatalf("create seed sandbox: %v", err)
+	}
+	defer destroy(t, seed)
+
+	awaitReady(t, ctx, seed)
+	seedSQL := `CREATE ROLE app_ro NOLOGIN;
+CREATE ROLE app_rw LOGIN PASSWORD 'seed-only-never-leaves-the-sandbox';
+CREATE TABLE orders (id bigserial PRIMARY KEY, total numeric(10,2) NOT NULL);
+INSERT INTO orders (total) SELECT (random()*100)::numeric(10,2) FROM generate_series(1,100);
+GRANT SELECT ON orders TO app_ro;`
+	mustExec(t, ctx, seed, "psql", "-h", "127.0.0.1", "-U", "postgres", "-v", "ON_ERROR_STOP=1", "-c", seedSQL)
+	mustExec(t, ctx, seed, "pg_dump", "-h", "127.0.0.1", "-U", "postgres", "-Fc", "-f", "/tmp/orders.dump", "postgres")
+	mustExec(t, ctx, seed, "sh", "-c",
+		"pg_dumpall -h 127.0.0.1 -U postgres --globals-only > /tmp/globals.sql")
+
+	for src, dest := range map[string]string{"/tmp/orders.dump": dump, "/tmp/globals.sql": globals} {
+		if out, err := exec.CommandContext(ctx, "docker", "cp", seed.ID()+":"+src, dest).CombinedOutput(); err != nil {
+			t.Fatalf("extract %s: %v: %s", src, err, out)
+		}
+	}
+}
+
 // TestPgBackRestEndToEnd proves the physical-restore path: a real
 // pgBackRest repository (stanza-create + full backup on a seed cluster) is
 // restored through the full stack into an idle sandbox, recovery replays
