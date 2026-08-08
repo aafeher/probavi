@@ -11,6 +11,34 @@ always called out explicitly.
 
 ## [Unreleased]
 
+### Added
+
+- **`bak_with_logins`, a SQL Server source kind that replays server
+  logins before the restore and refuses to pass while any restored user
+  is orphaned** (mssql adapter 0.2.0; tracked in #87). SQL Server splits
+  principals across two scopes — logins in `master`, database users
+  inside the `.bak`, linked by SID — so a plain `bak` drill restores the
+  users orphaned: `RESTORE` succeeds, checks pass, the record says
+  `pass`, and the application still cannot log in. This is the quiet
+  sibling of the PostgreSQL globals gap fixed in 0.4.0, without the loud
+  failure that made that one visible.
+
+  The source is one directory with both members named in `source.params`
+  (`logins`, and optionally `bak`; plain filenames, never paths). The
+  backup identity covers both members — a composite, size-framed SHA-256
+  in load order — and `created_at` is the *older* member's mtime: the set
+  is only as current as its stalest member. The logins script is replayed
+  with `sqlcmd -i` deliberately without `-b` (batch-abort would silently
+  skip every login after a mid-script collision); exactly one failure
+  class is tolerated, `Msg 15025` for principals the sandbox engine
+  itself created (`sa` and the `##...##` internal principals). After the
+  restore an orphan gate queries the restored database and fails the
+  provision if any SQL user is left without a matching server login — an
+  incomplete logins script cannot pass. Engine diagnostics bound for
+  protocol messages are scrubbed of `PASSWORD` literals and long hex
+  literals: a measured syntax error echoed a full password hash back, and
+  such text must never reach a signed evidence record.
+
 ## [0.4.0] - 2026-08-07
 
 ### Added

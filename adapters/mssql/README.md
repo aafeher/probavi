@@ -11,6 +11,7 @@ in-repo adapters, it is written from the protocol document alone.
 |-----------|---------------------------------------------------------------|
 | `bak`     | One native `BACKUP DATABASE ... TO DISK` file.                |
 | `bak_dir` | A directory of backup files; the newest regular file is restored (mtime, ties broken by name). |
+| `bak_with_logins` | A directory holding a server-logins T-SQL script (`params.logins`) and one `.bak`; the logins are replayed first, and the drill fails if any restored SQL user is left without a matching server login. |
 
 ## Sandbox image: start it idle
 
@@ -59,6 +60,93 @@ not expressible at all. The credential never protects anything reachable.
   Msg 3254 "volume ... is empty", Msg 3242 "not a valid ... backup set")
   is classified `source_corrupt`; restores that run and fail are
   `restore_failed`.
+
+## The bak_with_logins kind (server logins first)
+
+SQL Server splits principals across two scopes: **logins** live in
+`master`, **database users** live inside each database, linked by SID. A
+`.bak` carries the users but never the logins — restore it alone and every
+SQL user whose login is missing comes back **orphaned**: `RESTORE` succeeds,
+checks pass, and the application still cannot log in. A `bak` drill's
+record therefore proves data recoverability only. `bak_with_logins` makes
+the drill cover the whole principal chain:
+
+```yaml
+source:
+  kind: bak_with_logins
+  path: /backups/shop              # a directory holding both members
+  params:
+    logins: logins.sql             # bare filename inside the directory
+    bak: shop-2026-08-08.bak       # optional: without it, the newest non-logins file
+```
+
+The members are named explicitly (no filename-pattern guessing), and one
+directory can hold a shared logins script beside several databases'
+backups — one drill per database, each with its own checks and its own
+evidence record. `params.logins` is required; `params.bak` is optional so
+a drill against a rotating backup directory keeps working unattended.
+
+Export the logins the way recovery run-books do — `CREATE LOGIN` with the
+password hash and the **original SID**, so restored users re-link without
+repair. A minimal export, run on the production server:
+
+```sql
+SET NOCOUNT ON;
+SELECT 'CREATE LOGIN [' + name + '] WITH PASSWORD = '
+     + CONVERT(varchar(max), LOGINPROPERTY(name, 'PasswordHash'), 1)
+     + ' HASHED, SID = ' + CONVERT(varchar(max), sid, 1)
+     + ', CHECK_POLICY = OFF;'
+FROM sys.sql_logins
+WHERE name NOT LIKE '##%' AND name <> 'sa';
+```
+
+Tool-generated scripts (`sp_help_revlogin` descendants, dbatools
+`Export-DbaLogin`) work too. Two rules about script content:
+
+- The script is replayed as `sa`; it must not `ALTER` or disable the `sa`
+  login the adapter operates with — doing so fails the drill loudly.
+- Windows logins (`FROM WINDOWS`) cannot be created in a sandbox with no
+  domain; leave them out. The orphan check ignores Windows users for the
+  same reason (see below).
+
+### How the replay is judged
+
+The script is replayed with `sqlcmd -i` **without** `-b`, deliberately:
+with `-b`, sqlcmd stops at the first failed batch and silently skips every
+login after it, so the completeness of the replay would depend on login
+ordering. Without it a failure stops nothing, the exit code stays 0, and
+the verdict comes from classifying stderr instead. Exactly one failure
+class is tolerated — `Msg 15025` ("The server principal ... already
+exists") for principals the sandbox engine itself created: the `sa` login
+and the `##...##`-wrapped internal principals SQL Server setup installs
+(both `##MS_Policy...##` logins appear in `sys.sql_logins`, so faithful
+exports carry them). Any other diagnostic fails the drill as
+`restore_failed`.
+
+### The orphan gate
+
+After the restore, the adapter queries the restored database for SQL users
+(`type = 'S'`, `authentication_type = 1`) whose SID matches no server
+login, and **fails the provision** if any exist — otherwise an incomplete
+logins script would reintroduce the very defect this kind closes. Windows
+principals, contained users, and `WITHOUT LOGIN` users are outside the
+gate: the first cannot exist in the sandbox, the rest need no login.
+
+### Credentials never reach the record
+
+A logins script carries password verifiers, and the engine quotes the
+offending token back in syntax errors — including a full password hash.
+Every engine diagnostic bound for a protocol message is therefore scrubbed
+(`PASSWORD = '...'` literals and long hex literals are redacted) before it
+can reach a signed evidence record.
+
+## What the bak and bak_dir kinds do not prove
+
+A passing `bak` or `bak_dir` drill proves the database restores and its
+data validates — nothing about server-level objects: logins, server roles,
+linked servers, jobs. If your recovery depends on the application logging
+in afterwards, use `bak_with_logins`, or add a user-defined check with the
+orphan query from this README against your restored database.
 
 ## The dialect bridges
 
