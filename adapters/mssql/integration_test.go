@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +25,21 @@ const (
 	// to produce a fixture; the drill engine uses the adapter's documented
 	// sandbox constant.
 	seedPassword = "Probavi!Seed0"
+
+	// appLoginPassword seeds the application login the logins-drill
+	// fixture exports; it exists only inside the test sandboxes. The
+	// exported script carries its SCRAM-free password *hash*, so a
+	// successful authentication with this plaintext proves the hash and
+	// SID round-tripped through the drill.
+	appLoginPassword = "AppSeed!OnlyInSandbox1"
 )
+
+// orphanedUsersSQL is this test's own statement of the defect — kept
+// independent of the adapter's internal query so a regression there cannot
+// blind the assertion.
+const orphanedUsersSQL = "SET NOCOUNT ON; SELECT dp.name FROM sys.database_principals dp " +
+	"LEFT JOIN sys.server_principals sp ON dp.sid = sp.sid " +
+	"WHERE dp.type = 'S' AND dp.authentication_type = 1 AND sp.sid IS NULL ORDER BY dp.name"
 
 // verifiedImage is the engine image adapter.json declares this adapter
 // verified against. The manifest and this suite read the same value, so
@@ -177,6 +192,238 @@ func TestCorruptBakVerdict(t *testing.T) {
 	if err == nil || !errors.As(err, &aerr) || aerr.Code != "source_corrupt" {
 		t.Fatalf("provision error = %v, want source_corrupt", err)
 	}
+}
+
+// TestLoginsDrillEndToEnd reproduces issue #87 and proves the fix, and
+// each half is worthless without the other. A .bak carries database users
+// but not the server logins they map to by SID, so a plain bak drill
+// passes while the application principal cannot log in — the record claims
+// more than the drill proved. The bak_with_logins kind replays an exported
+// logins script first and gates on orphaned users afterwards.
+func TestLoginsDrillEndToEnd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
+	defer cancel()
+
+	buildAdapterOnPath(t, ctx)
+	provider := docker.New(nil)
+	fixtureDir := makeGrantedFixture(t, ctx, provider)
+
+	runner, err := adapter.New("mssql", nil, nil)
+	if err != nil {
+		t.Fatalf("resolve adapter: %v", err)
+	}
+
+	t.Run("kind bak still passes and leaves the orphan", func(t *testing.T) {
+		assertBakLeavesOrphan(t, ctx, provider, runner, fixtureDir)
+	})
+	t.Run("kind bak_with_logins restores the principal chain", func(t *testing.T) {
+		assertWithLoginsRestoresChain(t, ctx, provider, runner, fixtureDir)
+	})
+	t.Run("an incomplete logins script fails the drill", func(t *testing.T) {
+		assertIncompleteScriptFails(t, ctx, provider, runner, fixtureDir)
+	})
+}
+
+// assertBakLeavesOrphan is the reproduction half: the plain bak drill
+// passes while the restored user is orphaned and its login cannot
+// authenticate — the premise of #87.
+func assertBakLeavesOrphan(t *testing.T, ctx context.Context, provider *docker.Provider, runner *adapter.Runner, fixtureDir string) {
+	sbx, err := provider.Create(ctx, sandboxParams(t))
+	if err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	defer destroy(t, sbx)
+
+	res, err := runner.Provision(ctx, &adapter.ProvisionRequest{
+		Source:  adapter.ProvisionSource{Kind: "bak", Path: filepath.Join(fixtureDir, "shop.bak")},
+		Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
+	}, sbx)
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if orphans := orphanedUsers(t, ctx, sbx, res.Connection.Database); !slices.Contains(orphans, "app_user") {
+		t.Errorf("orphaned users = %v, want app_user — the premise of #87", orphans)
+	}
+	out, err := sbx.Exec(ctx, sandbox.ExecRequest{
+		Argv: appLoginArgv(res.Connection.Database, "SELECT 1"),
+		Env:  map[string]string{"SQLCMDPASSWORD": appLoginPassword},
+	})
+	if err != nil {
+		t.Fatalf("app login exec: %v", err)
+	}
+	if out.ExitCode == 0 {
+		t.Error("app_login authenticated against a restore without logins — premise broken")
+	}
+}
+
+// assertWithLoginsRestoresChain is the fix half, with the strongest proof
+// there is: the restored login authenticates with its original password
+// (the hash round-tripped) and reads exactly the table its restored grant
+// covers.
+func assertWithLoginsRestoresChain(t *testing.T, ctx context.Context, provider *docker.Provider, runner *adapter.Runner, fixtureDir string) {
+	sbx, err := provider.Create(ctx, sandboxParams(t))
+	if err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	defer destroy(t, sbx)
+
+	res, err := runner.Provision(ctx, &adapter.ProvisionRequest{
+		Source: adapter.ProvisionSource{
+			Kind:   "bak_with_logins",
+			Path:   fixtureDir,
+			Params: map[string]string{"logins": "logins.sql", "bak": "shop.bak"},
+		},
+		Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
+	}, sbx)
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if res.Timings.RestoreSeconds <= 0 {
+		t.Errorf("timings = %+v, want real measurements", res.Timings)
+	}
+	if orphans := orphanedUsers(t, ctx, sbx, res.Connection.Database); len(orphans) != 0 {
+		t.Errorf("orphaned users = %v, want none", orphans)
+	}
+	out, err := sbx.Exec(ctx, sandbox.ExecRequest{
+		Argv: appLoginArgv(res.Connection.Database, "SET NOCOUNT ON; SELECT count(*) FROM dbo.orders"),
+		Env:  map[string]string{"SQLCMDPASSWORD": appLoginPassword},
+	})
+	if err != nil {
+		t.Fatalf("app login exec: %v", err)
+	}
+	if count := strings.TrimSpace(string(out.Stdout)); out.ExitCode != 0 || count != "1" {
+		t.Errorf("app_login count = %q (exit %d, stderr %s), want 1 row through the restored grant",
+			count, out.ExitCode, out.Stderr)
+	}
+}
+
+// assertIncompleteScriptFails proves the orphan gate bites: a script that
+// loads cleanly but covers nothing must fail the drill, or an incomplete
+// export would reintroduce the defect one level down.
+func assertIncompleteScriptFails(t *testing.T, ctx context.Context, provider *docker.Provider, runner *adapter.Runner, fixtureDir string) {
+	incomplete := t.TempDir()
+	copyFile(t, filepath.Join(fixtureDir, "shop.bak"), filepath.Join(incomplete, "shop.bak"))
+	if err := os.WriteFile(filepath.Join(incomplete, "logins.sql"), []byte("PRINT 'no logins here';\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sbx, err := provider.Create(ctx, sandboxParams(t))
+	if err != nil {
+		t.Fatalf("create sandbox: %v", err)
+	}
+	defer destroy(t, sbx)
+
+	_, err = runner.Provision(ctx, &adapter.ProvisionRequest{
+		Source: adapter.ProvisionSource{
+			Kind:   "bak_with_logins",
+			Path:   incomplete,
+			Params: map[string]string{"logins": "logins.sql", "bak": "shop.bak"},
+		},
+		Sandbox: adapter.SandboxInfo{ScratchDir: sbx.ScratchDir()},
+	}, sbx)
+	var aerr *adapter.Error
+	if err == nil || !errors.As(err, &aerr) || aerr.Code != "restore_failed" {
+		t.Fatalf("provision error = %v, want restore_failed from the orphan gate", err)
+	}
+	if !strings.Contains(aerr.Message, "no matching server login") {
+		t.Errorf("message = %q, want the orphan verdict", aerr.Message)
+	}
+}
+
+// orphanedUsers lists restored SQL users with no matching server login,
+// asked through the drill engine as the sandbox superuser.
+func orphanedUsers(t *testing.T, ctx context.Context, sbx *docker.Sandbox, database string) []string {
+	t.Helper()
+	out, err := sbx.Exec(ctx, sandbox.ExecRequest{
+		Argv: []string{"/opt/mssql-tools18/bin/sqlcmd", "-S", "127.0.0.1,1433", "-U", "sa",
+			"-C", "-b", "-l", "5", "-d", database, "-h", "-1", "-W", "-Q", orphanedUsersSQL},
+		Env: map[string]string{"SQLCMDPASSWORD": "Probavi!DrillSandbox0"},
+	})
+	if err != nil || out.ExitCode != 0 {
+		t.Fatalf("orphan query: %v (exit %d, stderr %s)", err, out.ExitCode, out.Stderr)
+	}
+	var names []string
+	for _, line := range strings.Split(string(out.Stdout), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			names = append(names, line)
+		}
+	}
+	return names
+}
+
+func appLoginArgv(database, query string) []string {
+	return []string{"/opt/mssql-tools18/bin/sqlcmd", "-S", "127.0.0.1,1433", "-U", "app_login",
+		"-C", "-b", "-l", "5", "-d", database, "-h", "-1", "-W", "-Q", query}
+}
+
+func copyFile(t *testing.T, from, to string) {
+	t.Helper()
+	data, err := os.ReadFile(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(to, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// makeGrantedFixture seeds a throwaway engine with an application login, a
+// database user mapped to it, and a granted table; it extracts a real
+// BACKUP DATABASE artifact plus a logins script exported the way operators
+// do it — CREATE LOGIN with the password hash and the original SID, from
+// sys.sql_logins — into one source directory.
+func makeGrantedFixture(t *testing.T, ctx context.Context, provider *docker.Provider) string {
+	t.Helper()
+	dir := t.TempDir()
+	seed, err := provider.Create(ctx, sandboxParams(t))
+	if err != nil {
+		t.Fatalf("create seed sandbox: %v", err)
+	}
+	defer destroy(t, seed)
+
+	startEngine(t, ctx, seed, seedPassword)
+	awaitReady(t, ctx, seed, seedPassword)
+	seedSQL := []string{
+		"CREATE LOGIN app_login WITH PASSWORD = '" + appLoginPassword + "', CHECK_POLICY = OFF",
+		"CREATE DATABASE shop",
+		"USE shop; CREATE USER app_user FOR LOGIN app_login",
+		"CREATE TABLE shop.dbo.orders (id INT PRIMARY KEY, total DECIMAL(10,2))",
+		"INSERT INTO shop.dbo.orders VALUES (1, 10.50)",
+		"USE shop; GRANT SELECT ON dbo.orders TO app_user",
+		"BACKUP DATABASE shop TO DISK = N'/tmp/shop.bak'",
+	}
+	for _, stmt := range seedSQL {
+		mustSQL(t, ctx, seed, seedPassword, stmt)
+	}
+
+	// PRINT instead of SELECT sidesteps sqlcmd's column-width formatting;
+	// with -r 0 only the printed line reaches stdout.
+	export, err := seed.Exec(ctx, sandbox.ExecRequest{
+		Argv: []string{"/opt/mssql-tools18/bin/sqlcmd", "-S", "127.0.0.1,1433", "-U", "sa",
+			"-C", "-b", "-r", "0", "-Q",
+			"SET NOCOUNT ON; DECLARE @s varchar(max); " +
+				"SELECT @s = 'CREATE LOGIN [' + name + '] WITH PASSWORD = ' + " +
+				"CONVERT(varchar(max), LOGINPROPERTY(name, 'PasswordHash'), 1) + " +
+				"' HASHED, SID = ' + CONVERT(varchar(max), sid, 1) + ', CHECK_POLICY = OFF;' " +
+				"FROM sys.sql_logins WHERE name = 'app_login'; PRINT @s"},
+		Env: map[string]string{"SQLCMDPASSWORD": seedPassword},
+	})
+	if err != nil || export.ExitCode != 0 {
+		t.Fatalf("export logins: %v (exit %d, stderr %s)", err, export.ExitCode, export.Stderr)
+	}
+	script := strings.TrimSpace(string(export.Stdout))
+	if !strings.Contains(script, "HASHED") || !strings.Contains(script, "SID = 0x") {
+		t.Fatalf("exported script lacks hash or SID: %s", script)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "logins.sql"), []byte(script+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, err := exec.CommandContext(ctx, "docker", "cp", seed.ID()+":/tmp/shop.bak",
+		filepath.Join(dir, "shop.bak")).CombinedOutput(); err != nil {
+		t.Fatalf("extract fixture: %v: %s", err, out)
+	}
+	return dir
 }
 
 // buildAdapterOnPath builds the adapter binary and puts it on PATH under

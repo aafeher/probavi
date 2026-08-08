@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -143,6 +144,10 @@ func classify(t *testing.T, call verbCall) (execArgs, string) {
 		t.Fatal("exec with empty argv")
 	}
 	switch {
+	case args.Argv[0] == sqlcmdPath && slices.Contains(args.Argv, "-i"):
+		return args, "logins"
+	case args.Argv[0] == sqlcmdPath && slices.Contains(args.Argv, orphanQuery):
+		return args, "orphans"
 	case args.Argv[0] == sqlcmdPath:
 		return args, "probe"
 	case len(args.Argv) >= 3 && args.Argv[2] == initFileScript:

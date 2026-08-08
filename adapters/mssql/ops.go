@@ -12,7 +12,7 @@ import (
 
 const (
 	adapterName    = "mssql"
-	adapterVersion = "0.1.0"
+	adapterVersion = "0.2.0"
 
 	defaultUser     = "sa"
 	defaultDatabase = "probavi"
@@ -84,6 +84,7 @@ func probePayload() any {
 		"sources": []map[string]any{
 			{"kind": "bak", "capabilities": map[string]bool{"pitr": false}},
 			{"kind": "bak_dir", "capabilities": map[string]bool{"pitr": false}},
+			{"kind": "bak_with_logins", "capabilities": map[string]bool{"pitr": false}},
 		},
 		"sql_runner": map[string]any{
 			// -I turns on QUOTED_IDENTIFIER, so the SQL-standard
@@ -144,7 +145,7 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 		scratch = "/tmp"
 	}
 
-	src, perr := resolveSource(req.Source.Kind, req.Source.Path)
+	src, perr := resolveSource(req.Source.Kind, req.Source.Path, req.Source.Params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -159,7 +160,24 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 	}
 	logger.Info("engine ready", "seconds", readySeconds)
 
+	state := map[string]any{"database": database}
+	// Server logins go in before the restore: that is the order of the
+	// recovery run-book this drill stands for, and their load is part of
+	// the restore, not a phase of its own — the measured restore duration
+	// is the drill's RTO figure.
+	var loginsTransfer, loginsLoad float64
+	if src.loginsPath != "" {
+		loginsInSandbox := scratch + "/probavi-logins.sql"
+		loginsTransfer, loginsLoad, perr = loadLogins(ctx, c, src.loginsPath, loginsInSandbox)
+		if perr != nil {
+			return nil, perr
+		}
+		logger.Info("server logins loaded", "seconds", loginsLoad)
+		state["logins_path"] = loginsInSandbox
+	}
+
 	bakInSandbox := scratch + "/probavi-restore.bak"
+	state["bak_path"] = bakInSandbox
 	put, perr := c.putFile(ctx, putFileArgs{SourcePath: src.path, DestPath: bakInSandbox, Mode: "0600"})
 	if perr != nil {
 		return nil, perr
@@ -174,6 +192,12 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 	}
 	logger.Info("restore complete", "seconds", restore.DurationSeconds)
 
+	if src.loginsPath != "" {
+		if perr := verifyLoginsCoverRestoredUsers(ctx, c, database); perr != nil {
+			return nil, perr
+		}
+	}
+
 	return map[string]any{
 		"connection": map[string]any{
 			"scheme": "mssql", "host": "127.0.0.1", "port": defaultPort,
@@ -184,10 +208,10 @@ func opProvision(ctx context.Context, c *core, payload json.RawMessage, logger *
 		},
 		"timings": map[string]any{
 			"engine_ready_seconds": readySeconds,
-			"transfer_seconds":     put.DurationSeconds,
-			"restore_seconds":      restore.DurationSeconds,
+			"transfer_seconds":     loginsTransfer + put.DurationSeconds,
+			"restore_seconds":      loginsLoad + restore.DurationSeconds,
 		},
-		"state": map[string]any{"database": database, "bak_path": bakInSandbox},
+		"state": state,
 	}, nil
 }
 
@@ -353,24 +377,46 @@ func option(opts map[string]string, key, fallback string) string {
 // every server error is a "Msg N, Level …" header line followed by the
 // message text — the first text line is the root cause ("RESTORE … is
 // terminating abnormally" trails it). The result crosses the protocol as
-// a JSON string and lands in evidence error fields: keep it single-line
-// and quote-free.
+// a JSON string and lands in evidence error fields: keep it single-line,
+// quote-free, and free of credentials.
 func verdictLine(b []byte) string {
 	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
 		s := strings.TrimSpace(line)
 		if s == "" || strings.HasPrefix(s, "Msg ") {
 			continue
 		}
-		return strings.ReplaceAll(s, `"`, "'")
+		return strings.ReplaceAll(scrubSecrets(s), `"`, "'")
 	}
 	return ""
 }
 
-// firstLine reduces captured output to its first line, quote-free.
+// firstLine reduces captured output to its first line, quote-free and free
+// of credentials.
 func firstLine(b []byte) string {
 	s := strings.TrimSpace(string(b))
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
-	return strings.ReplaceAll(s, `"`, "'")
+	return strings.ReplaceAll(scrubSecrets(s), `"`, "'")
+}
+
+// A logins script carries every login's password verifier (CREATE LOGIN …
+// WITH PASSWORD = 0x0200… HASHED) and possibly plaintext password
+// literals, and the engine quotes the offending source token back in
+// syntax errors — measured: a malformed statement produced "Incorrect
+// syntax near '0x0200feedface…'", the full hash, lowercased. Engine
+// diagnostics are therefore a live path from a backup's credentials into
+// a signed evidence record, which the schema forbids from carrying any
+// (evidence schema §8). Long hex literals also cover SIDs; redacting
+// those costs nothing.
+var (
+	passwordLiteral = regexp.MustCompile(`(?i)password\s*=\s*N?'[^']*'`)
+	hexLiteral      = regexp.MustCompile(`(?i)0x[0-9a-f]{12,}`)
+)
+
+// scrubSecrets removes credential material from text bound for a protocol
+// message.
+func scrubSecrets(s string) string {
+	s = passwordLiteral.ReplaceAllString(s, "PASSWORD = '[redacted]'")
+	return hexLiteral.ReplaceAllString(s, "0x[redacted]")
 }

@@ -69,7 +69,7 @@
       "id": "mssql",
       "name": "SQL Server",
       "status": "experimental",
-      "adapter_version": "0.1.0",
+      "adapter_version": "0.2.0",
       "engine": {
         "id": "sqlserver",
         "name": "Microsoft SQL Server"
@@ -92,6 +92,11 @@
         {
           "id": "bak_dir",
           "name": "A directory of .bak files; the newest is restored",
+          "pitr": false
+        },
+        {
+          "id": "bak_with_logins",
+          "name": "A directory holding one .bak and a server-logins T-SQL script, restored together",
           "pitr": false
         }
       ],
